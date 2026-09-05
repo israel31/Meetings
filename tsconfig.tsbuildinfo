@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/components/createevent.tsx","./src/components/eventattendance.tsx","./src/components/home.tsx","./src/lib/spreadsheet.ts","./src/lib/storage.ts"],"errors":true,"version":"5.7.3"}
