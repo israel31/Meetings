@@ -2,9 +2,53 @@ import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import type { Attendee } from '../types'
 
-const NAME_KEYS = ['name', 'full name', 'fullname name', 'attendee', 'participant', 'student name', 'member']
-const EMAIL_KEYS = ['email', 'e-mail', 'mail', 'email address', 'e mail']
-const ID_KEYS = ['id', 'member id', 'student id', 'employee id', 'uid', 'user id', 'staff id', 'matric no', 'matric number', 'reg no', 'registration']
+const FULL_NAME_KEYS = [
+  'full name ( suname first )',
+  'full name ( surname first )',
+  'full name',
+  'fullname name',
+  'fullname',
+  'name',
+  'attendee',
+  'participant',
+  'member name',
+]
+const FAMILY_NAME_KEYS = ['family name', 'surname', 'last name', 'family']
+const EMAIL_KEYS = ['email address', 'email', 'e-mail', 'mail', 'e mail']
+const STATUS_KEYS = ['status', 'membership status', 'role', 'type', 'category']
+const PHONE_KEYS = [
+  'phone number',
+  'phone',
+  'mobile number',
+  'mobile',
+  'contact',
+  'telephone',
+  'phone no',
+]
+const FINANCIAL_KEYS = [
+  'financial member',
+  'financial',
+  'dues paid',
+  'paid member',
+  'financial status',
+  'paid',
+]
+const ID_KEYS = [
+  'id',
+  'member id',
+  'student id',
+  'employee id',
+  'uid',
+  'user id',
+  'staff id',
+  'matric no',
+  'matric number',
+  'reg no',
+  'registration',
+  'sn',
+  's/n',
+  's_n',
+]
 
 function normalizeHeader(value: string): string {
   return value.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
@@ -30,7 +74,11 @@ function cell(row: Record<string, unknown>, key?: string): string {
   return String(value).trim()
 }
 
-function rowsToAttendees(rows: Record<string, unknown>[]): Attendee[] {
+export function rowsToAttendees(
+  rows: Record<string, unknown>[],
+  listId: string = 'default-list',
+  listName: string = 'Main Roster',
+): Attendee[] {
   if (rows.length === 0) {
     throw new Error('No rows found in the spreadsheet.')
   }
@@ -40,13 +88,17 @@ function rowsToAttendees(rows: Record<string, unknown>[]): Attendee[] {
     throw new Error('Could not read column headers from the spreadsheet.')
   }
 
-  const nameCol = pickColumn(headers, NAME_KEYS)
+  const fullNameCol = pickColumn(headers, FULL_NAME_KEYS)
+  const familyNameCol = pickColumn(headers, FAMILY_NAME_KEYS)
   const emailCol = pickColumn(headers, EMAIL_KEYS)
+  const statusCol = pickColumn(headers, STATUS_KEYS)
+  const phoneCol = pickColumn(headers, PHONE_KEYS)
+  const financialCol = pickColumn(headers, FINANCIAL_KEYS)
   const idCol = pickColumn(headers, ID_KEYS)
 
-  if (!nameCol && !emailCol && !idCol) {
+  if (!fullNameCol && !emailCol && !idCol) {
     throw new Error(
-      'Could not find Name, Email, or ID columns. Use headers like Name, Email, and ID.',
+      'Could not find Name, Email, or ID columns. Expecting columns like FULL NAME ( SUNAME FIRST ), EMAIL ADDRESS, etc.',
     )
   }
 
@@ -54,33 +106,47 @@ function rowsToAttendees(rows: Record<string, unknown>[]): Attendee[] {
   const seen = new Set<string>()
 
   rows.forEach((row, index) => {
-    const name = cell(row, nameCol)
+    const fullName = cell(row, fullNameCol)
+    const familyName = cell(row, familyNameCol)
     const email = cell(row, emailCol)
+    const status = cell(row, statusCol)
+    const phone = cell(row, phoneCol)
+    const financialMember = cell(row, financialCol)
     const externalId = cell(row, idCol)
 
-    if (!name && !email && !externalId) return
+    if (!fullName && !email && !externalId) return
 
-    const dedupeKey = `${externalId}|${email}|${name}`.toLowerCase()
+    const dedupeKey = `${externalId}|${email}|${fullName}`.toLowerCase()
     if (seen.has(dedupeKey)) return
     seen.add(dedupeKey)
 
     attendees.push({
       id: crypto.randomUUID(),
-      name: name || email || `Attendee ${index + 1}`,
-      email,
+      fullName: fullName || email || `Attendee ${index + 1}`,
+      familyName: familyName || '',
+      email: email || '',
+      status: status || 'Member',
+      phone: phone || '',
+      financialMember: financialMember || '—',
       externalId: externalId || String(index + 1),
       present: false,
+      listId,
+      listName,
     })
   })
 
   if (attendees.length === 0) {
-    throw new Error('Spreadsheet has headers but no attendee rows.')
+    throw new Error('Spreadsheet has headers but no valid attendee rows.')
   }
 
   return attendees
 }
 
-function parseCsvText(text: string): Attendee[] {
+function parseCsvText(
+  text: string,
+  listId: string = 'default-list',
+  listName: string = 'Main Roster',
+): Attendee[] {
   const parsed = Papa.parse<Record<string, unknown>>(text, {
     header: true,
     skipEmptyLines: true,
@@ -91,16 +157,20 @@ function parseCsvText(text: string): Attendee[] {
     throw new Error(parsed.errors[0]?.message || 'Failed to parse CSV.')
   }
 
-  return rowsToAttendees(parsed.data)
+  return rowsToAttendees(parsed.data, listId, listName)
 }
 
-function parseWorkbook(buffer: ArrayBuffer): Attendee[] {
+function parseWorkbook(
+  buffer: ArrayBuffer,
+  listId: string = 'default-list',
+  listName: string = 'Main Roster',
+): Attendee[] {
   const workbook = XLSX.read(buffer, { type: 'array' })
   const sheetName = workbook.SheetNames[0]
   if (!sheetName) throw new Error('Workbook has no sheets.')
   const sheet = workbook.Sheets[sheetName]
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
-  return rowsToAttendees(rows)
+  return rowsToAttendees(rows, listId, listName)
 }
 
 /** Convert common Google Sheets / Excel Online URLs into downloadable CSV candidate URLs. */
@@ -132,15 +202,19 @@ export function getSpreadsheetCandidateUrls(rawUrl: string): string[] {
   return [url]
 }
 
-export async function parseSpreadsheetFile(file: File): Promise<Attendee[]> {
+export async function parseSpreadsheetFile(
+  file: File,
+  listId: string = 'file-list',
+  listName: string = 'Uploaded Sheet',
+): Promise<Attendee[]> {
   const name = file.name.toLowerCase()
   if (name.endsWith('.csv') || file.type.includes('csv') || file.type.includes('text/')) {
     const text = await file.text()
-    return parseCsvText(text)
+    return parseCsvText(text, listId, listName)
   }
 
   const buffer = await file.arrayBuffer()
-  return parseWorkbook(buffer)
+  return parseWorkbook(buffer, listId, listName)
 }
 
 const CORS_PROXIES = [
@@ -167,7 +241,11 @@ async function fetchSpreadsheetBytes(rawUrl: string): Promise<{ buffer: ArrayBuf
         // Peek at content to see if it's a HTML response (e.g. Google Login or Access Denied page)
         const snippet = new TextDecoder().decode(buffer.slice(0, 800)).toLowerCase()
         if (snippet.includes('<!doctype') || snippet.includes('<html')) {
-          if (snippet.includes('servicelogin') || snippet.includes('accounts.google.com') || snippet.includes('sign in')) {
+          if (
+            snippet.includes('servicelogin') ||
+            snippet.includes('accounts.google.com') ||
+            snippet.includes('sign in')
+          ) {
             detectedLoginHtml = true
           }
           continue
@@ -175,7 +253,7 @@ async function fetchSpreadsheetBytes(rawUrl: string): Promise<{ buffer: ArrayBuf
 
         return { buffer, contentType }
       } catch {
-        // try next proxy/candidate
+        // try next proxy
       }
     }
   }
@@ -191,7 +269,11 @@ async function fetchSpreadsheetBytes(rawUrl: string): Promise<{ buffer: ArrayBuf
   )
 }
 
-export async function parseSpreadsheetUrl(rawUrl: string): Promise<Attendee[]> {
+export async function parseSpreadsheetUrl(
+  rawUrl: string,
+  listId: string = 'link-list',
+  listName: string = 'Google Sheet Link',
+): Promise<Attendee[]> {
   const { buffer, contentType } = await fetchSpreadsheetBytes(rawUrl)
 
   if (
@@ -200,13 +282,12 @@ export async function parseSpreadsheetUrl(rawUrl: string): Promise<Attendee[]> {
     rawUrl.toLowerCase().includes('.xlsx') ||
     rawUrl.toLowerCase().includes('.xls')
   ) {
-    return parseWorkbook(buffer)
+    return parseWorkbook(buffer, listId, listName)
   }
 
   const text = new TextDecoder().decode(buffer)
-  return parseCsvText(text)
+  return parseCsvText(text, listId, listName)
 }
-
 
 export type ExportFilter = 'all' | 'present' | 'absent'
 
@@ -225,16 +306,22 @@ function sanitizeFilename(title: string, filter: ExportFilter, ext: string): str
 export function exportAttendanceCsv(
   attendees: Attendee[],
   eventTitle: string,
-  filter: ExportFilter = 'all'
+  filter: ExportFilter = 'all',
 ): void {
   const filtered = filterAttendees(attendees, filter)
   const rows = filtered.map((a) => ({
-    ID: a.externalId,
-    Name: a.name,
-    Email: a.email,
-    Present: a.present ? 'Yes' : 'No',
-    'Checked In At': a.checkedInAt ? new Date(a.checkedInAt).toLocaleString() : '',
+    'EMAIL ADDRESS': a.email,
+    'FULL NAME ( SUNAME FIRST )': a.fullName,
+    'FAMILY NAME': a.familyName,
+    STATUS: a.status,
+    'PHONE NUMBER': a.phone,
+    'FINANCIAL MEMBER': a.financialMember,
+    'ATTENDANCE STATUS': a.present ? 'Present' : 'Absent',
+    'CHECK-IN TIME': a.checkedInAt ? new Date(a.checkedInAt).toLocaleString() : '',
+    'ROSTER LIST': a.listName,
+    'CHECKED IN BY': a.checkedInBy || '',
   }))
+
   const csv = Papa.unparse(rows)
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
@@ -248,16 +335,21 @@ export function exportAttendanceCsv(
 export function exportAttendanceXlsx(
   attendees: Attendee[],
   eventTitle: string,
-  filter: ExportFilter = 'all'
+  filter: ExportFilter = 'all',
 ): void {
   const filtered = filterAttendees(attendees, filter)
 
   const rows = filtered.map((a) => ({
-    'Attendee ID': a.externalId,
-    Name: a.name,
-    Email: a.email,
-    'Attendance Status': a.present ? 'Present' : 'Absent',
-    'Check-in Time': a.checkedInAt ? new Date(a.checkedInAt).toLocaleString() : '-',
+    'EMAIL ADDRESS': a.email,
+    'FULL NAME ( SUNAME FIRST )': a.fullName,
+    'FAMILY NAME': a.familyName,
+    STATUS: a.status,
+    'PHONE NUMBER': a.phone,
+    'FINANCIAL MEMBER': a.financialMember,
+    'ATTENDANCE STATUS': a.present ? 'Present' : 'Absent',
+    'CHECK-IN TIME': a.checkedInAt ? new Date(a.checkedInAt).toLocaleString() : '—',
+    'ROSTER LIST': a.listName,
+    'CHECKED IN BY': a.checkedInBy || '—',
   }))
 
   const worksheet = XLSX.utils.json_to_sheet(rows)
@@ -265,13 +357,17 @@ export function exportAttendanceXlsx(
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Attendance Roster')
 
   worksheet['!cols'] = [
-    { wch: 15 },
-    { wch: 25 },
-    { wch: 30 },
-    { wch: 18 },
-    { wch: 24 },
+    { wch: 28 }, // EMAIL ADDRESS
+    { wch: 30 }, // FULL NAME ( SUNAME FIRST )
+    { wch: 20 }, // FAMILY NAME
+    { wch: 15 }, // STATUS
+    { wch: 18 }, // PHONE NUMBER
+    { wch: 18 }, // FINANCIAL MEMBER
+    { wch: 18 }, // ATTENDANCE STATUS
+    { wch: 22 }, // CHECK-IN TIME
+    { wch: 22 }, // ROSTER LIST
+    { wch: 18 }, // CHECKED IN BY
   ]
 
   XLSX.writeFile(workbook, sanitizeFilename(eventTitle, filter, 'xlsx'))
 }
-

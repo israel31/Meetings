@@ -1,6 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { EventRecord } from '../types'
 import { exportAttendanceCsv, exportAttendanceXlsx, type ExportFilter } from '../lib/spreadsheet'
+import { getDeviceName, syncManager } from '../lib/supabase'
+import { ShareRoomModal } from './ShareRoomModal'
+import { DatabaseSettingsModal } from './DatabaseSettingsModal'
 
 interface Props {
   event: EventRecord
@@ -15,9 +18,45 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [exportScope, setExportScope] = useState<ExportFilter>('all')
+  const [selectedListId, setSelectedListId] = useState<string>('all')
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [syncStatus] = useState<string>('⚡ Live Supabase / Device Sync Active')
 
   const isEnded = event.status === 'ended'
+  const deviceName = getDeviceName()
 
+  // Subscribe to real-time broadcasts from other devices
+  useEffect(() => {
+    if (!event.syncCode) return
+
+    const unsubscribe = syncManager.subscribeToSync(event.syncCode, (msg) => {
+      if (msg.type === 'CHECKIN_UPDATE') {
+        onUpdate({
+          ...event,
+          attendees: event.attendees.map((a) => {
+            if (a.id !== msg.attendeeId) return a
+            return {
+              ...a,
+              present: msg.present,
+              checkedInAt: msg.checkedInAt,
+              checkedInBy: msg.checkedInBy,
+            }
+          }),
+        })
+      } else if (msg.type === 'FULL_EVENT_SYNC') {
+        onUpdate(msg.event)
+      }
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [event.syncCode, event.attendees])
+
+  const lists = event.lists || []
+
+  // Calculate statistics across all devices and all lists
   const stats = useMemo(() => {
     const present = event.attendees.filter((a) => a.present).length
     const total = event.attendees.length
@@ -30,66 +69,111 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
     }
   }, [event.attendees])
 
+  // Filter attendees by list assignment, search query, and attendance filter
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return event.attendees.filter((a) => {
+      if (selectedListId !== 'all' && a.listId !== selectedListId) return false
       if (filter === 'present' && !a.present) return false
       if (filter === 'absent' && a.present) return false
       if (!q) return true
       return (
-        a.name.toLowerCase().includes(q) ||
+        a.fullName.toLowerCase().includes(q) ||
+        a.familyName.toLowerCase().includes(q) ||
         a.email.toLowerCase().includes(q) ||
+        a.phone.toLowerCase().includes(q) ||
+        a.status.toLowerCase().includes(q) ||
         a.externalId.toLowerCase().includes(q)
       )
     })
-  }, [event.attendees, query, filter])
+  }, [event.attendees, selectedListId, query, filter])
 
   function toggle(attendeeId: string) {
-    const attendees = event.attendees.map((a) => {
+    const now = new Date().toISOString()
+    let updatedPresent = false
+    let updatedTime: string | undefined = undefined
+
+    const updatedAttendees = event.attendees.map((a) => {
       if (a.id !== attendeeId) return a
-      const present = !a.present
+      updatedPresent = !a.present
+      updatedTime = updatedPresent ? now : undefined
       return {
         ...a,
-        present,
-        checkedInAt: present ? new Date().toISOString() : undefined,
+        present: updatedPresent,
+        checkedInAt: updatedTime,
+        checkedInBy: updatedPresent ? deviceName : undefined,
       }
     })
-    onUpdate({ ...event, attendees })
+
+    const updatedEvent: EventRecord = {
+      ...event,
+      attendees: updatedAttendees,
+      updatedAt: now,
+    }
+
+    onUpdate(updatedEvent)
+
+    // Broadcast change to all other devices in real-time!
+    if (event.syncCode) {
+      syncManager.broadcastCheckIn(event.syncCode, attendeeId, updatedPresent, updatedTime)
+    }
   }
 
   function markAll(present: boolean) {
     const now = new Date().toISOString()
-    onUpdate({
-      ...event,
-      attendees: event.attendees.map((a) => ({
+    const updatedAttendees = event.attendees.map((a) => {
+      // If list filter is active, only mark attendees in selected list
+      if (selectedListId !== 'all' && a.listId !== selectedListId) return a
+      return {
         ...a,
         present,
         checkedInAt: present ? a.checkedInAt || now : undefined,
-      })),
+        checkedInBy: present ? a.checkedInBy || deviceName : undefined,
+      }
     })
+
+    const updatedEvent: EventRecord = {
+      ...event,
+      attendees: updatedAttendees,
+      updatedAt: now,
+    }
+
+    onUpdate(updatedEvent)
+
+    if (event.syncCode) {
+      syncManager.broadcastFullSync(event.syncCode, updatedEvent)
+    }
   }
 
   function handleEndEvent() {
     if (
       window.confirm(
-        `Are you sure you want to end “${event.title}”? Live attendance check-in will be finalized.`,
+        `Are you sure you want to end “${event.title}”? Live attendance will be finalized.`,
       )
     ) {
-      onUpdate({
+      const updatedEvent: EventRecord = {
         ...event,
         status: 'ended',
         endedAt: new Date().toISOString(),
-      })
+      }
+      onUpdate(updatedEvent)
+      if (event.syncCode) {
+        syncManager.broadcastFullSync(event.syncCode, updatedEvent)
+      }
     }
   }
 
   function handleReopenEvent() {
     if (window.confirm(`Reopen “${event.title}” for live check-ins?`)) {
-      onUpdate({
+      const updatedEvent: EventRecord = {
         ...event,
         status: 'active',
         endedAt: undefined,
-      })
+      }
+      onUpdate(updatedEvent)
+      if (event.syncCode) {
+        syncManager.broadcastFullSync(event.syncCode, updatedEvent)
+      }
     }
   }
 
@@ -108,13 +192,6 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
       })
     : 'No date'
 
-  const endedAtLabel = event.endedAt
-    ? new Date(event.endedAt).toLocaleString(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      })
-    : null
-
   return (
     <div className="panel">
       <div className="top-nav-bar">
@@ -123,6 +200,24 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         </button>
 
         <div className="nav-actions">
+          <button
+            type="button"
+            className="btn btn-accent"
+            onClick={() => setShowShareModal(true)}
+            title="Connect multiple devices to this meeting room"
+          >
+            📲 Add Device / Share
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setShowSettingsModal(true)}
+            title="Database & Device Settings"
+          >
+            ⚙️ Settings
+          </button>
+
           {isEnded ? (
             <button type="button" className="btn btn-ghost" onClick={handleReopenEvent}>
               ↻ Reopen event
@@ -145,20 +240,23 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
             {isEnded ? (
               <span className="badge badge-ended">Meeting Ended</span>
             ) : (
-              <span className="badge badge-active">Live Event</span>
+              <span className="badge badge-active">Live Meeting</span>
             )}
           </div>
 
           <div className="event-meta" style={{ marginTop: '0.5rem' }}>
             <span>{dateLabel}</span>
             {event.location && <span>{event.location}</span>}
-            <span>{event.attendees.length} on roster</span>
-            {isEnded && endedAtLabel && <span>Ended on {endedAtLabel}</span>}
+            <span>{event.attendees.length} total on roster</span>
+            <span>Device: <strong>{deviceName}</strong></span>
           </div>
-          {event.notes && <p className="muted" style={{ marginTop: '0.65rem' }}>{event.notes}</p>}
-          <p className="muted" style={{ marginTop: '0.35rem', fontSize: '0.8rem' }}>
-            Source: {event.sourceLabel}
-          </p>
+
+          {event.syncCode && (
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <span className="pill pill-lime">{syncStatus}</span>
+              <span className="pill">Room Code: <strong>{event.syncCode}</strong></span>
+            </div>
+          )}
         </div>
 
         <div className="stats">
@@ -177,58 +275,95 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         </div>
       </div>
 
-      {isEnded && (
-        <div className="ended-summary-card">
-          <div className="ended-info">
-            <div className="ended-icon">📊</div>
-            <div>
-              <h3>Meeting Concluded - Attendance Report Ready</h3>
-              <p className="muted">
-                Final turnout: <strong>{stats.present} of {stats.total}</strong> attendees ({stats.rate}% attendance rate).
-                {endedAtLabel ? ` Closed at ${endedAtLabel}.` : ''}
-              </p>
-            </div>
+      {/* Device Roster Assignment Bar */}
+      <div className="device-assignment-bar" style={{ marginTop: '1.25rem', padding: '0.85rem 1rem', background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <strong style={{ color: 'var(--jci-navy)' }}>📱 Device Roster Assignment:</strong>
+            <span className="muted" style={{ marginLeft: '0.5rem', fontSize: '0.9rem' }}>
+              Select which list this device is handling
+            </span>
           </div>
 
-          <div className="export-controls">
-            <div className="export-scope-selector">
-              <label htmlFor="export-scope" className="export-scope-label">Filter export:</label>
-              <select
-                id="export-scope"
-                className="export-select"
-                value={exportScope}
-                onChange={(e) => setExportScope(e.target.value as ExportFilter)}
-              >
-                <option value="all">All Attendees ({stats.total})</option>
-                <option value="present">Present Only ({stats.present})</option>
-                <option value="absent">Absent Only ({stats.absent})</option>
-              </select>
-            </div>
+          <div className="filter-group">
+            <button
+              type="button"
+              className={`tab ${selectedListId === 'all' ? 'active' : ''}`}
+              onClick={() => setSelectedListId('all')}
+            >
+              All Lists ({event.attendees.length})
+            </button>
 
-            <div className="export-btn-group">
-              <button
-                type="button"
-                className="btn btn-accent"
-                onClick={() => exportAttendanceCsv(event.attendees, event.title, exportScope)}
-              >
-                📥 Export CSV
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => exportAttendanceXlsx(event.attendees, event.title, exportScope)}
-              >
-                📊 Export Excel (.xlsx)
-              </button>
-            </div>
+            {lists.map((list) => {
+              const listCount = event.attendees.filter((a) => a.listId === list.id).length
+              return (
+                <button
+                  key={list.id}
+                  type="button"
+                  className={`tab ${selectedListId === list.id ? 'active' : ''}`}
+                  onClick={() => setSelectedListId(list.id)}
+                >
+                  {list.name} ({listCount})
+                </button>
+              )
+            })}
           </div>
         </div>
-      )}
+      </div>
 
-      <div className="toolbar">
+      {/* Meeting Concluded & Export Card */}
+      <div className="ended-summary-card" style={{ marginTop: '1.25rem' }}>
+        <div className="ended-info">
+          <div className="ended-icon">📊</div>
+          <div>
+            <h3>Consolidated Attendance Report</h3>
+            <p className="muted">
+              Turnout: <strong>{stats.present} of {stats.total}</strong> attendees ({stats.rate}% attendance rate).
+              Any device can export combined attendance data from all devices and lists.
+            </p>
+          </div>
+        </div>
+
+        <div className="export-controls">
+          <div className="export-scope-selector">
+            <label htmlFor="export-scope" className="export-scope-label">
+              Filter export:
+            </label>
+            <select
+              id="export-scope"
+              className="export-select"
+              value={exportScope}
+              onChange={(e) => setExportScope(e.target.value as ExportFilter)}
+            >
+              <option value="all">All Attendees ({stats.total})</option>
+              <option value="present">Present Only ({stats.present})</option>
+              <option value="absent">Absent Only ({stats.absent})</option>
+            </select>
+          </div>
+
+          <div className="export-btn-group">
+            <button
+              type="button"
+              className="btn btn-accent"
+              onClick={() => exportAttendanceCsv(event.attendees, event.title, exportScope)}
+            >
+              📥 Export CSV
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => exportAttendanceXlsx(event.attendees, event.title, exportScope)}
+            >
+              📊 Export Excel (.xlsx)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="toolbar" style={{ marginTop: '1rem' }}>
         <input
           type="search"
-          placeholder="Search name, email, or ID…"
+          placeholder="Search full name, family name, email, phone, status..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search attendees"
@@ -255,46 +390,40 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
             </button>
           </>
         )}
-        {!isEnded && (
-          <div className="export-dropdown-inline">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => exportAttendanceCsv(event.attendees, event.title, 'all')}
-              title="Download CSV attendance"
-            >
-              Export CSV
-            </button>
-          </div>
-        )}
       </div>
 
       {filtered.length === 0 ? (
         <div className="empty">
-          <h3>No matches</h3>
-          <p className="muted">Try another search or filter.</p>
+          <h3>No matches found</h3>
+          <p className="muted">Try adjusting your search query or list filter.</p>
         </div>
       ) : (
-        <div className="attendee-list">
+        <div className="attendee-list" style={{ marginTop: '1rem' }}>
           {filtered.map((a) => (
             <div key={a.id} className={`attendee ${a.present ? 'present' : ''}`}>
               <button
                 type="button"
                 className="check"
                 onClick={() => toggle(a.id)}
-                aria-label={a.present ? `Mark ${a.name} absent` : `Mark ${a.name} present`}
+                aria-label={a.present ? `Mark ${a.fullName} absent` : `Mark ${a.fullName} present`}
                 aria-pressed={a.present}
               >
                 ✓
               </button>
               <div className="attendee-info">
-                <h4>{a.name}</h4>
+                <h4>
+                  {a.fullName} {a.familyName ? `(${a.familyName})` : ''}
+                </h4>
                 <p>
-                  {a.externalId}
-                  {a.email ? ` · ${a.email}` : ''}
-                  {a.present && a.checkedInAt
-                    ? ` · ${new Date(a.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                    : ''}
+                  {a.email ? `✉️ ${a.email} · ` : ''}
+                  {a.phone ? `📞 ${a.phone} · ` : ''}
+                  Status: <strong>{a.status}</strong> · Financial: <strong>{a.financialMember}</strong>
+                </p>
+                <p className="muted" style={{ fontSize: '0.8rem', marginTop: '0.2rem' }}>
+                  List: <span className="pill" style={{ padding: '0.1rem 0.4rem', fontSize: '0.75rem' }}>{a.listName}</span>
+                  {a.present && a.checkedInAt ? (
+                    <span> · Checked in at {new Date(a.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {a.checkedInBy ? `by ${a.checkedInBy}` : ''}</span>
+                  ) : null}
                 </p>
               </div>
               <button
@@ -302,13 +431,24 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
                 className={`btn mark-btn ${a.present ? 'btn-primary' : 'btn-ghost'}`}
                 onClick={() => toggle(a.id)}
               >
-                {a.present ? 'Present' : 'Mark in'}
+                {a.present ? 'Present' : 'Mark In'}
               </button>
             </div>
           ))}
         </div>
       )}
+
+      {showShareModal && event.syncCode && (
+        <ShareRoomModal
+          syncCode={event.syncCode}
+          eventTitle={event.title}
+          onClose={() => setShowShareModal(false)}
+        />
+      )}
+
+      {showSettingsModal && (
+        <DatabaseSettingsModal onClose={() => setShowSettingsModal(false)} />
+      )}
     </div>
   )
 }
-
