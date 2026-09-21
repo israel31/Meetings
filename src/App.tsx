@@ -14,12 +14,40 @@ export default function App() {
 
   useEffect(() => {
     saveEvents(events)
+    events.forEach((evt) => {
+      if (evt.syncCode) {
+        void syncManager.saveEventToCloud(evt)
+      }
+    })
   }, [events])
 
   // Automatic join when opening a shared URL parameter e.g. ?event=MEET-7492
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get('event')
+    function getEventCodeFromUrl(): string | null {
+      // 1. Check standard query params: ?event=MEET-xxxx
+      const searchParams = new URLSearchParams(window.location.search)
+      let code = searchParams.get('event')
+      if (code) return code
+
+      // 2. Check hash route query params: #/?event=MEET-xxxx or #event=MEET-xxxx
+      if (window.location.hash) {
+        const hash = window.location.hash
+        const qIdx = hash.indexOf('?')
+        if (qIdx !== -1) {
+          const hashParams = new URLSearchParams(hash.slice(qIdx))
+          code = hashParams.get('event')
+          if (code) return code
+        } else if (hash.includes('event=')) {
+          const cleanHash = hash.replace(/^#\/?/, '')
+          const hashParams = new URLSearchParams(cleanHash)
+          code = hashParams.get('event')
+          if (code) return code
+        }
+      }
+      return null
+    }
+
+    const code = getEventCodeFromUrl()
     if (code) {
       void handleJoinRoomCode(code.trim().toUpperCase())
     }
@@ -33,6 +61,9 @@ export default function App() {
 
     events.forEach((evt) => {
       if (!evt.syncCode) return
+      // Persist to Cloud DB when loaded
+      void syncManager.saveEventToCloud(evt)
+
       const unsub = syncManager.subscribeToSync(evt.syncCode, (msg) => {
         if (msg.type === 'REQUEST_SYNC') {
           syncManager.broadcastFullSync(evt.syncCode, evt)

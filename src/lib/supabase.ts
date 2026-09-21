@@ -5,8 +5,8 @@ const CONFIG_STORAGE_KEY = 'meetings_supabase_config_v1'
 const DEVICE_ID_KEY = 'meetings_device_id_v1'
 const DEVICE_NAME_KEY = 'meetings_device_name_v1'
 
-const DEFAULT_SUPABASE_URL = 'https://xyzcompany.supabase.co'
-const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.dummy'
+const DEFAULT_SUPABASE_URL = 'https://ekoylhztqkxjpntyjkym.supabase.co'
+const DEFAULT_SUPABASE_KEY = 'sb_publishable_QeTkM3_Lw0zVrw17LqMCkA_DXVIJAlu'
 
 export function getStoredSupabaseConfig(): SupabaseConfig | null {
   try {
@@ -72,7 +72,7 @@ export function getSupabaseClient(): SupabaseClient | null {
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) ||
     DEFAULT_SUPABASE_KEY
 
-  if (!url || !key || url === DEFAULT_SUPABASE_URL || url.includes('your-project')) {
+  if (!url || !key || url.includes('your-project') || url.includes('xyzcompany')) {
     return null
   }
 
