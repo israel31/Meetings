@@ -29,6 +29,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
     if (!event.syncCode) return
     const unsubscribe = syncManager.subscribeToSync(event.syncCode, (msg) => {
       if (msg.type === 'CHECKIN_UPDATE') {
+        if (msg.checkedInBy && msg.checkedInBy === deviceName) return
         onUpdate({
           ...event,
           attendees: event.attendees.map((a) => {
@@ -48,7 +49,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
     return () => {
       unsubscribe()
     }
-  }, [event.syncCode, event.attendees])
+  }, [event.syncCode, event.attendees, deviceName])
 
   const lists = event.lists || []
 
@@ -159,15 +160,6 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
     }
   }
 
-  const dateLabel = event.date
-    ? new Date(event.date + 'T00:00:00').toLocaleDateString(undefined, {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })
-    : 'No date'
-
   return (
     <div className="panel">
       <div className="top-nav-bar">
@@ -208,27 +200,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
 
       <div className="event-header" style={{ marginTop: '1.25rem' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
-            <h1 style={{ margin: 0 }}>{event.title}</h1>
-            {isEnded ? (
-              <span className="badge badge-ended">Meeting Ended</span>
-            ) : (
-              <span className="badge badge-active">Live Meeting</span>
-            )}
-          </div>
-          <div className="event-meta">
-            <span>{dateLabel}</span>
-            {event.location && <span>• {event.location}</span>}
-            <span>• Device: <strong>{deviceName}</strong></span>
-          </div>
-          {event.syncCode && (
-            <div style={{ marginTop: '0.65rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span className="pill pill-lime">Sync Active</span>
-              <span className="pill" style={{ fontFamily: 'var(--font-mono)' }}>
-                Room: <strong>{event.syncCode}</strong>
-              </span>
-            </div>
-          )}
+          <h1 style={{ margin: 0 }}>{event.title}</h1>
         </div>
 
         <div className="stats">
@@ -280,13 +252,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
       )}
 
       <div className="ended-summary-card">
-        <div className="ended-info">
-          <h3>Consolidated Attendance Report</h3>
-          <p className="muted" style={{ margin: '0.2rem 0 0', fontSize: '0.88rem' }}>
-            Turnout: <strong>{stats.present} of {stats.total}</strong> ({stats.rate}%). Exports compile updates from all synced devices.
-          </p>
-        </div>
-        <div className="export-controls">
+        <div className="export-controls" style={{ borderTop: 'none', paddingTop: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>Filter export:</span>
             <select
@@ -371,24 +337,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
                 ) : null}
               </button>
               <div className="attendee-info">
-                <h4>
-                  {a.fullName} {a.familyName ? `(${a.familyName})` : ''}
-                </h4>
-                <p>
-                  {a.email && <span>{a.email} • </span>}
-                  {a.phone && <span>{a.phone} • </span>}
-                  Status: <strong>{a.status}</strong>
-                  {a.financialMember && ` • Dues: ${a.financialMember}`}
-                </p>
-                <p className="muted" style={{ fontSize: '0.78rem', marginTop: '0.2rem' }}>
-                  <span className="pill" style={{ padding: '0.1rem 0.45rem' }}>{a.listName}</span>
-                  {a.present && a.checkedInAt ? (
-                    <span style={{ marginLeft: '0.5rem' }}>
-                      Checked in at {new Date(a.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      {a.checkedInBy ? ` by ${a.checkedInBy}` : ''}
-                    </span>
-                  ) : null}
-                </p>
+                <h4>{a.fullName}</h4>
               </div>
               <button
                 type="button"

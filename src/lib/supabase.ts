@@ -188,7 +188,7 @@ class MeetingSyncManager {
       try {
         channel = client
           .channel(channelName, {
-            config: { broadcast: { self: true, ack: true } },
+            config: { broadcast: { self: false } },
           })
           .on('broadcast', { event: 'ATTENDANCE_EVENT' }, (payload) => {
             if (payload.payload?.syncCode?.toLowerCase() === cleanCode) {

@@ -313,7 +313,6 @@ export function exportAttendanceCsv(
     'EMAIL ADDRESS': a.email,
     'FULL NAME ( SUNAME FIRST )': a.fullName,
     'FAMILY NAME': a.familyName,
-    STATUS: a.status,
     'PHONE NUMBER': a.phone,
     'FINANCIAL MEMBER': a.financialMember,
     'ATTENDANCE STATUS': a.present ? 'Present' : 'Absent',
@@ -343,7 +342,6 @@ export function exportAttendanceXlsx(
     'EMAIL ADDRESS': a.email,
     'FULL NAME ( SUNAME FIRST )': a.fullName,
     'FAMILY NAME': a.familyName,
-    STATUS: a.status,
     'PHONE NUMBER': a.phone,
     'FINANCIAL MEMBER': a.financialMember,
     'ATTENDANCE STATUS': a.present ? 'Present' : 'Absent',
@@ -360,7 +358,6 @@ export function exportAttendanceXlsx(
     { wch: 28 }, // EMAIL ADDRESS
     { wch: 30 }, // FULL NAME ( SUNAME FIRST )
     { wch: 20 }, // FAMILY NAME
-    { wch: 15 }, // STATUS
     { wch: 18 }, // PHONE NUMBER
     { wch: 18 }, // FINANCIAL MEMBER
     { wch: 18 }, // ATTENDANCE STATUS
