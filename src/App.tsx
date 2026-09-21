@@ -21,15 +21,12 @@ export default function App() {
     })
   }, [events])
 
-  // Automatic join when opening a shared URL parameter e.g. ?event=MEET-7492
   useEffect(() => {
     function getEventCodeFromUrl(): string | null {
-      // 1. Check standard query params: ?event=MEET-xxxx
       const searchParams = new URLSearchParams(window.location.search)
       let code = searchParams.get('event')
       if (code) return code
 
-      // 2. Check hash route query params: #/?event=MEET-xxxx or #event=MEET-xxxx
       if (window.location.hash) {
         const hash = window.location.hash
         const qIdx = hash.indexOf('?')
@@ -53,17 +50,12 @@ export default function App() {
     }
   }, [])
 
-  // Auto-respond to sync requests from joining devices & sync cloud updates
   useEffect(() => {
     if (events.length === 0) return
-
     const cleanupFns: Array<() => void> = []
-
     events.forEach((evt) => {
       if (!evt.syncCode) return
-      // Persist to Cloud DB when loaded
       void syncManager.saveEventToCloud(evt)
-
       const unsub = syncManager.subscribeToSync(evt.syncCode, (msg) => {
         if (msg.type === 'REQUEST_SYNC') {
           syncManager.broadcastFullSync(evt.syncCode, evt)
@@ -71,7 +63,6 @@ export default function App() {
       })
       cleanupFns.push(unsub)
     })
-
     return () => {
       cleanupFns.forEach((fn) => fn())
     }
@@ -99,11 +90,8 @@ export default function App() {
       syncCode: payload.syncCode,
       createdAt: new Date().toISOString(),
     }
-
     setEvents((prev) => [event, ...prev])
     setView({ name: 'event', eventId: event.id })
-
-    // Broadcast and save to Supabase Cloud DB
     syncManager.broadcastFullSync(payload.syncCode, event)
   }
 
@@ -121,18 +109,13 @@ export default function App() {
 
   async function handleJoinRoomCode(syncCode: string) {
     const clean = syncCode.trim().toUpperCase()
-    const found = events.find(
-      (e) => e.syncCode && e.syncCode.toUpperCase() === clean,
-    )
-
+    const found = events.find((e) => e.syncCode && e.syncCode.toUpperCase() === clean)
     if (found) {
       setView({ name: 'event', eventId: found.id })
       return
     }
 
     setJoiningSyncCode(clean)
-
-    // 1. Try fetching directly from Supabase Cloud DB
     const cloudEvent = await syncManager.fetchEventFromCloud(clean)
     if (cloudEvent) {
       setEvents((prev) => [cloudEvent, ...prev.filter((e) => e.id !== cloudEvent.id)])
@@ -141,7 +124,6 @@ export default function App() {
       return
     }
 
-    // 2. Otherwise listen to Realtime broadcast from active host/peers
     const unsubscribe = syncManager.subscribeToSync(clean, (msg) => {
       if (msg.type === 'FULL_EVENT_SYNC' && msg.event) {
         setEvents((prev) => {
@@ -162,7 +144,7 @@ export default function App() {
     setTimeout(() => {
       setJoiningSyncCode((current) => {
         if (current === clean) {
-          alert(`Connecting to Room "${clean}". Make sure the host device has the meeting room open on their screen to sync.`)
+          alert(`Connecting to Room "${clean}". Ensure the host has the meeting room open on their screen.`)
           return null
         }
         return current
@@ -170,32 +152,40 @@ export default function App() {
     }, 8000)
   }
 
-  const activeEvent =
-    view.name === 'event' ? events.find((e) => e.id === view.eventId) : undefined
+  const activeEvent = view.name === 'event' ? events.find((e) => e.id === view.eventId) : undefined
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <button type="button" className="brand" onClick={() => setView({ name: 'home' })}>
-          <span className="brand-mark">✓</span>
+          <span className="brand-mark">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+          </span>
           <span className="brand-name">Meetings</span>
         </button>
-        <span className="brand-tag">Event attendance from spreadsheets</span>
+        <span className="brand-tag">Event Attendance Platform</span>
       </header>
 
       {joiningSyncCode && (
-        <div className="panel" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
-          <div className="brand-mark" style={{ margin: '0 auto 1rem', width: '3.5rem', height: '3.5rem', fontSize: '1.75rem' }}>
-            ⚡
+        <div className="panel" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
+          <div className="brand-mark" style={{ margin: '0 auto 1.25rem', width: '3.5rem', height: '3.5rem' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+            </svg>
           </div>
-          <h2>Connecting to Live Room "{joiningSyncCode}"...</h2>
+          <h2>Connecting to Live Room "{joiningSyncCode}"</h2>
           <p className="muted" style={{ marginTop: '0.5rem' }}>
-            Fetching roster lists and attendance status across networks...
+            Synchronizing attendee rosters and multi-device registers...
           </p>
           <button
             type="button"
             className="btn btn-ghost"
-            style={{ marginTop: '1.5rem' }}
+            style={{ marginTop: '1.75rem' }}
             onClick={() => setJoiningSyncCode(null)}
           >
             Cancel
@@ -230,16 +220,16 @@ export default function App() {
       )}
 
       {!joiningSyncCode && view.name === 'event' && !activeEvent && (
-        <div className="panel">
-          <h1>Event not found</h1>
-          <p className="muted">It may have been deleted or the link is invalid.</p>
+        <div className="panel" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+          <h2>Event Not Found</h2>
+          <p className="muted">This event may have been removed or the link is invalid.</p>
           <button
             type="button"
             className="btn btn-primary"
-            style={{ marginTop: '1rem' }}
+            style={{ marginTop: '1.5rem' }}
             onClick={() => setView({ name: 'home' })}
           >
-            Back home
+            Back Home
           </button>
         </div>
       )}

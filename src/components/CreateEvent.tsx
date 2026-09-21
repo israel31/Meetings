@@ -32,11 +32,10 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [location, setLocation] = useState('')
   const [notes, setNotes] = useState('')
-
   const [entries, setEntries] = useState<PendingListEntry[]>([
     {
       id: crypto.randomUUID(),
-      name: 'Google Link 1',
+      name: 'General Members',
       type: 'link',
       url: '',
       loading: false,
@@ -50,7 +49,7 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
       ...prev,
       {
         id: crypto.randomUUID(),
-        name: `Google Link ${num}`,
+        name: `Roster Link ${num}`,
         type: 'link',
         url: '',
         loading: false,
@@ -80,17 +79,13 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
   }
 
   function updateEntry(id: string, update: Partial<PendingListEntry>) {
-    setEntries((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, ...update } : e)),
-    )
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...update } : e)))
   }
 
   async function loadList(id: string) {
     const target = entries.find((e) => e.id === id)
     if (!target) return
-
     updateEntry(id, { loading: true, error: undefined })
-
     try {
       let list: Attendee[] = []
       if (target.type === 'link') {
@@ -104,7 +99,6 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
         }
         list = await parseSpreadsheetFile(target.file, id, target.name.trim() || 'File Roster')
       }
-
       updateEntry(id, { attendees: list, loading: false })
     } catch (err) {
       updateEntry(id, {
@@ -123,7 +117,7 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
     return combined
   }, [entries])
 
-  const preview = useMemo(() => allAttendees.slice(0, 8), [allAttendees])
+  const preview = useMemo(() => allAttendees.slice(0, 5), [allAttendees])
 
   function submit(e: FormEvent) {
     e.preventDefault()
@@ -131,12 +125,10 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
       alert('Event title is required.')
       return
     }
-
     if (allAttendees.length === 0) {
-      alert('Please load at least one Google Sheet link or spreadsheet file with attendees.')
+      alert('Please load at least one Google Sheet link or file with attendees.')
       return
     }
-
     const rosterLists: RosterListInput[] = entries
       .filter((e) => e.attendees.length > 0)
       .map((e) => ({
@@ -149,8 +141,7 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
 
     const randNum = Math.floor(1000 + Math.random() * 9000)
     const syncCode = `MEET-${randNum}`
-
-    const mainSourceLabel = `${rosterLists.length} list${rosterLists.length === 1 ? '' : 's'} (${allAttendees.length} total attendees)`
+    const mainSourceLabel = `${rosterLists.length} list${rosterLists.length === 1 ? '' : 's'} (${allAttendees.length} attendees)`
 
     onCreate({
       title: title.trim(),
@@ -169,20 +160,21 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
       <button type="button" className="btn btn-ghost" onClick={onCancel}>
         ← Back
       </button>
+
       <h1 style={{ marginTop: '1rem' }}>Create Multi-Link Event</h1>
       <p className="muted">
-        Add one or more Google Sheet links or spreadsheet files. Multiple devices can connect to handle specific lists!
+        Connect Google Sheets or upload rosters. Multiple devices can take attendance concurrently.
       </p>
 
-      <form className="form-grid" onSubmit={submit}>
+      <form className="form-grid" onSubmit={submit} style={{ marginTop: '1.5rem' }}>
         <div className="form-row two">
           <label>
-            Event title
+            Event Title
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="General Meeting & Attendance"
+              placeholder="e.g. General Assembly & Meeting"
               required
             />
           </label>
@@ -194,12 +186,12 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
 
         <div className="form-row two">
           <label>
-            Location / Link (optional)
+            Location / Meeting Room
             <input
               type="text"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              placeholder="Google Meet / Main Hall"
+              placeholder="e.g. Main Hall / Google Meet"
             />
           </label>
           <label>
@@ -208,72 +200,72 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Attendance taking guidelines"
+              placeholder="e.g. Financial check-ins handled at Gate A"
             />
           </label>
         </div>
 
-        <div className="import-box" style={{ marginTop: '1rem' }}>
+        <div className="import-box" style={{ marginTop: '1.25rem' }}>
           <div>
-            <strong style={{ color: 'var(--jci-navy)', fontSize: '1.1rem' }}>
-              Google Sheet Links & Rosters ({entries.length} List Sources)
+            <strong style={{ color: 'var(--jci-navy)', fontSize: '1.05rem' }}>
+              Rosters & Sheets ({entries.length} List Sources)
             </strong>
-            <p className="muted" style={{ margin: '0.25rem 0 1rem' }}>
-              Columns expected: <code>EMAIL ADDRESS</code>, <code>FULL NAME ( SUNAME FIRST )</code>, <code>FAMILY NAME</code>, <code>STATUS</code>, <code>PHONE NUMBER</code>, <code>FINANCIAL MEMBER</code>
+            <p className="muted" style={{ margin: '0.2rem 0 0.85rem', fontSize: '0.84rem' }}>
+              Expected columns: <code>EMAIL ADDRESS</code>, <code>FULL NAME</code>, <code>FAMILY NAME</code>, <code>STATUS</code>, <code>FINANCIAL MEMBER</code>
             </p>
           </div>
 
-          <div className="entries-stack" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <div style={{ display: 'grid', gap: '1rem' }}>
             {entries.map((entry, index) => (
-              <div key={entry.id} className="entry-card" style={{ padding: '1rem', background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <div key={entry.id} className="entry-card">
+                <div className="entry-card-header">
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 1 }}>
                     <span className="pill pill-lime">List #{index + 1}</span>
                     <input
                       type="text"
-                      value={entry.name || ''}
+                      value={entry.name}
                       onChange={(e) => updateEntry(entry.id, { name: e.target.value })}
-                      placeholder="List Title (e.g. Executive Members)"
-                      style={{ fontWeight: 600, padding: '0.3rem 0.6rem', fontSize: '0.95rem' }}
+                      placeholder="e.g. Executive Board"
+                      style={{ fontWeight: 700, padding: '0.4rem 0.75rem', maxWidth: '280px' }}
                     />
                   </div>
                   {entries.length > 1 && (
                     <button
                       type="button"
                       className="btn btn-ghost"
-                      style={{ color: 'var(--danger)', padding: '0.2rem 0.6rem' }}
+                      style={{ color: 'var(--coral)', padding: '0.3rem 0.75rem' }}
                       onClick={() => removeEntry(entry.id)}
                     >
-                      Remove List
+                      Remove
                     </button>
                   )}
                 </div>
 
-                <div className="tabs" role="tablist" style={{ marginBottom: '0.75rem' }}>
+                <div className="tabs" style={{ marginBottom: '0.75rem' }}>
                   <button
                     type="button"
                     className={`tab ${entry.type === 'link' ? 'active' : ''}`}
                     onClick={() => updateEntry(entry.id, { type: 'link' })}
                   >
-                    🔗 Google Link
+                    Google Sheet Link
                   </button>
                   <button
                     type="button"
                     className={`tab ${entry.type === 'upload' ? 'active' : ''}`}
                     onClick={() => updateEntry(entry.id, { type: 'upload' })}
                   >
-                    📁 Upload File
+                    Upload CSV / Excel
                   </button>
                 </div>
 
                 {entry.type === 'link' ? (
-                  <div className="form-row" style={{ gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <input
                       type="url"
-                      value={entry.url || ''}
+                      value={entry.url}
                       onChange={(e) => updateEntry(entry.id, { url: e.target.value })}
                       placeholder="https://docs.google.com/spreadsheets/d/..."
-                      style={{ flex: 1 }}
+                      style={{ flex: 1, minWidth: '220px' }}
                     />
                     <button
                       type="button"
@@ -281,21 +273,19 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
                       onClick={() => void loadList(entry.id)}
                       disabled={entry.loading}
                     >
-                      {entry.loading ? 'Fetching…' : 'Load Link'}
+                      {entry.loading ? 'Fetching...' : 'Load Link'}
                     </button>
                   </div>
                 ) : (
-                  <div className="form-row" style={{ gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <input
                       type="file"
                       accept=".csv,.xlsx,.xls"
                       onChange={(e) => {
                         const file = e.target.files?.[0]
-                        if (file) {
-                          updateEntry(entry.id, { file })
-                        }
+                        if (file) updateEntry(entry.id, { file })
                       }}
-                      style={{ flex: 1 }}
+                      style={{ flex: 1, minWidth: '220px' }}
                     />
                     <button
                       type="button"
@@ -303,15 +293,19 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
                       onClick={() => void loadList(entry.id)}
                       disabled={entry.loading || !entry.file}
                     >
-                      {entry.loading ? 'Reading…' : 'Load File'}
+                      {entry.loading ? 'Reading...' : 'Load File'}
                     </button>
                   </div>
                 )}
 
-                {entry.error && <p className="error" style={{ marginTop: '0.5rem' }}>{entry.error}</p>}
+                {entry.error && (
+                  <p style={{ margin: '0.5rem 0 0', color: 'var(--coral)', fontSize: '0.84rem' }}>
+                    {entry.error}
+                  </p>
+                )}
 
                 {entry.attendees.length > 0 && (
-                  <p className="success-msg" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                  <p style={{ margin: '0.5rem 0 0', color: '#0b6b6b', fontWeight: 600, fontSize: '0.84rem' }}>
                     ✓ Loaded {entry.attendees.length} attendees for "{entry.name}"
                   </p>
                 )}
@@ -319,53 +313,48 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
             ))}
           </div>
 
-          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
             <button type="button" className="btn btn-ghost" onClick={addLinkEntry}>
-              + Add Another Google Link
+              + Add Google Sheet Link
             </button>
             <button type="button" className="btn btn-ghost" onClick={addFileEntry}>
-              + Add Another Spreadsheet File
+              + Add Spreadsheet File
             </button>
           </div>
 
           {allAttendees.length > 0 && (
-            <div className="preview" style={{ marginTop: '1.5rem' }}>
-              <div className="preview-stats">
-                <span className="pill pill-lime">{allAttendees.length} Total Attendees Across All Lists</span>
-                <span className="pill">Ready for Multi-Device Attendance</span>
+            <div style={{ marginTop: '1.25rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                <span className="pill pill-lime">{allAttendees.length} Total Attendees</span>
+                <span className="pill">Ready for Multi-Device Sync</span>
               </div>
-              <div className="table-wrap" style={{ marginTop: '0.75rem' }}>
-                <table>
+              <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid var(--line)', background: '#fff' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                   <thead>
-                    <tr>
-                      <th>FULL NAME</th>
-                      <th>EMAIL ADDRESS</th>
-                      <th>STATUS</th>
-                      <th>ROSTER LIST</th>
+                    <tr style={{ background: 'var(--paper-subtle)', textAlign: 'left' }}>
+                      <th style={{ padding: '0.65rem 0.85rem' }}>FULL NAME</th>
+                      <th style={{ padding: '0.65rem 0.85rem' }}>EMAIL</th>
+                      <th style={{ padding: '0.65rem 0.85rem' }}>STATUS</th>
+                      <th style={{ padding: '0.65rem 0.85rem' }}>ROSTER LIST</th>
                     </tr>
                   </thead>
                   <tbody>
                     {preview.map((a) => (
-                      <tr key={a.id}>
-                        <td><strong>{a.fullName}</strong> {a.familyName ? `(${a.familyName})` : ''}</td>
-                        <td>{a.email || '—'}</td>
-                        <td>{a.status || 'Member'}</td>
-                        <td><span className="pill">{a.listName}</span></td>
+                      <tr key={a.id} style={{ borderTop: '1px solid var(--line)' }}>
+                        <td style={{ padding: '0.65rem 0.85rem' }}><strong>{a.fullName}</strong></td>
+                        <td style={{ padding: '0.65rem 0.85rem' }}>{a.email || '—'}</td>
+                        <td style={{ padding: '0.65rem 0.85rem' }}>{a.status || 'Member'}</td>
+                        <td style={{ padding: '0.65rem 0.85rem' }}><span className="pill">{a.listName}</span></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {allAttendees.length > preview.length && (
-                <p className="muted" style={{ marginTop: '0.5rem' }}>
-                  Showing first {preview.length} of {allAttendees.length} attendees
-                </p>
-              )}
             </div>
           )}
         </div>
 
-        <div className="form-actions" style={{ marginTop: '1.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem', flexWrap: 'wrap' }}>
           <button type="submit" className="btn btn-accent" disabled={allAttendees.length === 0}>
             Create Multi-Device Event
           </button>

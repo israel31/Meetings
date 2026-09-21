@@ -21,15 +21,12 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
   const [selectedListId, setSelectedListId] = useState<string>('all')
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
-  const [syncStatus] = useState<string>('⚡ Live Supabase / Device Sync Active')
 
   const isEnded = event.status === 'ended'
   const deviceName = getDeviceName()
 
-  // Subscribe to real-time broadcasts from other devices
   useEffect(() => {
     if (!event.syncCode) return
-
     const unsubscribe = syncManager.subscribeToSync(event.syncCode, (msg) => {
       if (msg.type === 'CHECKIN_UPDATE') {
         onUpdate({
@@ -48,7 +45,6 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         onUpdate(msg.event)
       }
     })
-
     return () => {
       unsubscribe()
     }
@@ -56,20 +52,13 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
 
   const lists = event.lists || []
 
-  // Calculate statistics across all devices and all lists
   const stats = useMemo(() => {
     const present = event.attendees.filter((a) => a.present).length
     const total = event.attendees.length
     const rate = total > 0 ? Math.round((present / total) * 100) : 0
-    return {
-      total,
-      present,
-      absent: total - present,
-      rate,
-    }
+    return { total, present, absent: total - present, rate }
   }, [event.attendees])
 
-  // Filter attendees by list assignment, search query, and attendance filter
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return event.attendees.filter((a) => {
@@ -92,7 +81,6 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
     const now = new Date().toISOString()
     let updatedPresent = false
     let updatedTime: string | undefined = undefined
-
     const updatedAttendees = event.attendees.map((a) => {
       if (a.id !== attendeeId) return a
       updatedPresent = !a.present
@@ -104,16 +92,12 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         checkedInBy: updatedPresent ? deviceName : undefined,
       }
     })
-
     const updatedEvent: EventRecord = {
       ...event,
       attendees: updatedAttendees,
       updatedAt: now,
     }
-
     onUpdate(updatedEvent)
-
-    // Broadcast change to all other devices in real-time!
     if (event.syncCode) {
       syncManager.broadcastCheckIn(event.syncCode, attendeeId, updatedPresent, updatedTime)
     }
@@ -122,7 +106,6 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
   function markAll(present: boolean) {
     const now = new Date().toISOString()
     const updatedAttendees = event.attendees.map((a) => {
-      // If list filter is active, only mark attendees in selected list
       if (selectedListId !== 'all' && a.listId !== selectedListId) return a
       return {
         ...a,
@@ -131,26 +114,19 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         checkedInBy: present ? a.checkedInBy || deviceName : undefined,
       }
     })
-
     const updatedEvent: EventRecord = {
       ...event,
       attendees: updatedAttendees,
       updatedAt: now,
     }
-
     onUpdate(updatedEvent)
-
     if (event.syncCode) {
       syncManager.broadcastFullSync(event.syncCode, updatedEvent)
     }
   }
 
   function handleEndEvent() {
-    if (
-      window.confirm(
-        `Are you sure you want to end “${event.title}”? Live attendance will be finalized.`,
-      )
-    ) {
+    if (window.confirm(`End "${event.title}"? Attendance will be finalized.`)) {
       const updatedEvent: EventRecord = {
         ...event,
         status: 'ended',
@@ -164,7 +140,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
   }
 
   function handleReopenEvent() {
-    if (window.confirm(`Reopen “${event.title}” for live check-ins?`)) {
+    if (window.confirm(`Reopen "${event.title}" for live check-ins?`)) {
       const updatedEvent: EventRecord = {
         ...event,
         status: 'active',
@@ -178,53 +154,50 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
   }
 
   function confirmDelete() {
-    if (window.confirm(`Delete “${event.title}”? This cannot be undone.`)) {
+    if (window.confirm(`Delete "${event.title}"? This cannot be undone.`)) {
       onDelete(event.id)
     }
   }
 
   const dateLabel = event.date
     ? new Date(event.date + 'T00:00:00').toLocaleDateString(undefined, {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
     : 'No date'
 
   return (
     <div className="panel">
       <div className="top-nav-bar">
         <button type="button" className="btn btn-ghost" onClick={onBack}>
-          ← All events
+          Back to Events
         </button>
-
         <div className="nav-actions">
           <button
             type="button"
             className="btn btn-accent"
             onClick={() => setShowShareModal(true)}
-            title="Connect multiple devices to this meeting room"
+            title="Connect multiple devices to this room"
           >
-            📲 Add Device / Share
+            Add Device / Share
           </button>
-
           <button
             type="button"
             className="btn btn-ghost"
             onClick={() => setShowSettingsModal(true)}
             title="Database & Device Settings"
           >
-            ⚙️ Settings
+            Settings
           </button>
-
           {isEnded ? (
             <button type="button" className="btn btn-ghost" onClick={handleReopenEvent}>
-              ↻ Reopen event
+              Reopen
             </button>
           ) : (
             <button type="button" className="btn btn-end-event" onClick={handleEndEvent}>
-              ⏹ End Event
+              End Event
             </button>
           )}
           <button type="button" className="btn btn-danger" onClick={confirmDelete}>
@@ -233,28 +206,27 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         </div>
       </div>
 
-      <div className="event-header" style={{ marginTop: '1rem' }}>
+      <div className="event-header" style={{ marginTop: '1.25rem' }}>
         <div>
-          <div className="title-row">
-            <h1>{event.title}</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+            <h1 style={{ margin: 0 }}>{event.title}</h1>
             {isEnded ? (
               <span className="badge badge-ended">Meeting Ended</span>
             ) : (
               <span className="badge badge-active">Live Meeting</span>
             )}
           </div>
-
-          <div className="event-meta" style={{ marginTop: '0.5rem' }}>
+          <div className="event-meta">
             <span>{dateLabel}</span>
-            {event.location && <span>{event.location}</span>}
-            <span>{event.attendees.length} total on roster</span>
-            <span>Device: <strong>{deviceName}</strong></span>
+            {event.location && <span>• {event.location}</span>}
+            <span>• Device: <strong>{deviceName}</strong></span>
           </div>
-
           {event.syncCode && (
-            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <span className="pill pill-lime">{syncStatus}</span>
-              <span className="pill">Room Code: <strong>{event.syncCode}</strong></span>
+            <div style={{ marginTop: '0.65rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="pill pill-lime">Sync Active</span>
+              <span className="pill" style={{ fontFamily: 'var(--font-mono)' }}>
+                Room: <strong>{event.syncCode}</strong>
+              </span>
             </div>
           )}
         </div>
@@ -275,63 +247,50 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         </div>
       </div>
 
-      {/* Device Roster Assignment Bar */}
-      <div className="device-assignment-bar" style={{ marginTop: '1.25rem', padding: '0.85rem 1rem', background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '10px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-          <div>
-            <strong style={{ color: 'var(--jci-navy)' }}>📱 Device Roster Assignment:</strong>
-            <span className="muted" style={{ marginLeft: '0.5rem', fontSize: '0.9rem' }}>
-              Select which list this device is handling
+      {lists.length > 1 && (
+        <div style={{ margin: '1.25rem 0', padding: '0.85rem 1.15rem', background: 'var(--surface-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--line-subtle)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.65rem' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--jci-navy)' }}>
+              Device List Assignment:
             </span>
-          </div>
-
-          <div className="filter-group">
-            <button
-              type="button"
-              className={`tab ${selectedListId === 'all' ? 'active' : ''}`}
-              onClick={() => setSelectedListId('all')}
-            >
-              All Lists ({event.attendees.length})
-            </button>
-
-            {lists.map((list) => {
-              const listCount = event.attendees.filter((a) => a.listId === list.id).length
-              return (
-                <button
-                  key={list.id}
-                  type="button"
-                  className={`tab ${selectedListId === list.id ? 'active' : ''}`}
-                  onClick={() => setSelectedListId(list.id)}
-                >
-                  {list.name} ({listCount})
-                </button>
-              )
-            })}
+            <div className="filter-group" style={{ flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`tab ${selectedListId === 'all' ? 'active' : ''}`}
+                onClick={() => setSelectedListId('all')}
+              >
+                All Lists ({event.attendees.length})
+              </button>
+              {lists.map((list) => {
+                const listCount = event.attendees.filter((a) => a.listId === list.id).length
+                return (
+                  <button
+                    key={list.id}
+                    type="button"
+                    className={`tab ${selectedListId === list.id ? 'active' : ''}`}
+                    onClick={() => setSelectedListId(list.id)}
+                  >
+                    {list.name} ({listCount})
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Meeting Concluded & Export Card */}
-      <div className="ended-summary-card" style={{ marginTop: '1.25rem' }}>
+      <div className="ended-summary-card">
         <div className="ended-info">
-          <div className="ended-icon">📊</div>
-          <div>
-            <h3>Consolidated Attendance Report</h3>
-            <p className="muted">
-              Turnout: <strong>{stats.present} of {stats.total}</strong> attendees ({stats.rate}% attendance rate).
-              Any device can export combined attendance data from all devices and lists.
-            </p>
-          </div>
+          <h3>Consolidated Attendance Report</h3>
+          <p className="muted" style={{ margin: '0.2rem 0 0', fontSize: '0.88rem' }}>
+            Turnout: <strong>{stats.present} of {stats.total}</strong> ({stats.rate}%). Exports compile updates from all synced devices.
+          </p>
         </div>
-
         <div className="export-controls">
-          <div className="export-scope-selector">
-            <label htmlFor="export-scope" className="export-scope-label">
-              Filter export:
-            </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>Filter export:</span>
             <select
-              id="export-scope"
-              className="export-select"
+              style={{ width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.84rem' }}
               value={exportScope}
               onChange={(e) => setExportScope(e.target.value as ExportFilter)}
             >
@@ -340,33 +299,31 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
               <option value="absent">Absent Only ({stats.absent})</option>
             </select>
           </div>
-
           <div className="export-btn-group">
             <button
               type="button"
-              className="btn btn-accent"
+              className="btn btn-ghost"
               onClick={() => exportAttendanceCsv(event.attendees, event.title, exportScope)}
             >
-              📥 Export CSV
+              Export CSV
             </button>
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => exportAttendanceXlsx(event.attendees, event.title, exportScope)}
             >
-              📊 Export Excel (.xlsx)
+              Export Excel (.xlsx)
             </button>
           </div>
         </div>
       </div>
 
-      <div className="toolbar" style={{ marginTop: '1rem' }}>
+      <div className="toolbar" style={{ marginTop: '1.25rem' }}>
         <input
           type="search"
-          placeholder="Search full name, family name, email, phone, status..."
+          placeholder="Search name, family name, email, or phone..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          aria-label="Search attendees"
         />
         <div className="filter-group">
           {(['all', 'present', 'absent'] as Filter[]).map((f) => (
@@ -381,21 +338,21 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
           ))}
         </div>
         {!isEnded && (
-          <>
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
             <button type="button" className="btn btn-ghost" onClick={() => markAll(true)}>
-              Mark all present
+              Mark All
             </button>
             <button type="button" className="btn btn-ghost" onClick={() => markAll(false)}>
               Clear
             </button>
-          </>
+          </div>
         )}
       </div>
 
       {filtered.length === 0 ? (
-        <div className="empty">
-          <h3>No matches found</h3>
-          <p className="muted">Try adjusting your search query or list filter.</p>
+        <div className="panel" style={{ marginTop: '1rem', padding: '2.5rem 1rem', textAlign: 'center' }}>
+          <h3 style={{ margin: 0, color: 'var(--jci-navy)', fontFamily: 'var(--font-heading)' }}>No matching attendees</h3>
+          <p className="muted" style={{ marginTop: '0.35rem' }}>Try adjusting your search query or list filter.</p>
         </div>
       ) : (
         <div className="attendee-list" style={{ marginTop: '1rem' }}>
@@ -406,23 +363,30 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
                 className="check"
                 onClick={() => toggle(a.id)}
                 aria-label={a.present ? `Mark ${a.fullName} absent` : `Mark ${a.fullName} present`}
-                aria-pressed={a.present}
               >
-                ✓
+                {a.present ? (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : null}
               </button>
               <div className="attendee-info">
                 <h4>
                   {a.fullName} {a.familyName ? `(${a.familyName})` : ''}
                 </h4>
                 <p>
-                  {a.email ? `✉️ ${a.email} · ` : ''}
-                  {a.phone ? `📞 ${a.phone} · ` : ''}
-                  Status: <strong>{a.status}</strong> · Financial: <strong>{a.financialMember}</strong>
+                  {a.email && <span>{a.email} • </span>}
+                  {a.phone && <span>{a.phone} • </span>}
+                  Status: <strong>{a.status}</strong>
+                  {a.financialMember && ` • Dues: ${a.financialMember}`}
                 </p>
-                <p className="muted" style={{ fontSize: '0.8rem', marginTop: '0.2rem' }}>
-                  List: <span className="pill" style={{ padding: '0.1rem 0.4rem', fontSize: '0.75rem' }}>{a.listName}</span>
+                <p className="muted" style={{ fontSize: '0.78rem', marginTop: '0.2rem' }}>
+                  <span className="pill" style={{ padding: '0.1rem 0.45rem' }}>{a.listName}</span>
                   {a.present && a.checkedInAt ? (
-                    <span> · Checked in at {new Date(a.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {a.checkedInBy ? `by ${a.checkedInBy}` : ''}</span>
+                    <span style={{ marginLeft: '0.5rem' }}>
+                      Checked in at {new Date(a.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {a.checkedInBy ? ` by ${a.checkedInBy}` : ''}
+                    </span>
                   ) : null}
                 </p>
               </div>
@@ -431,7 +395,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
                 className={`btn mark-btn ${a.present ? 'btn-primary' : 'btn-ghost'}`}
                 onClick={() => toggle(a.id)}
               >
-                {a.present ? 'Present' : 'Mark In'}
+                {a.present ? 'Present' : 'Check In'}
               </button>
             </div>
           ))}

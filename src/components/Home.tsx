@@ -25,11 +25,11 @@ export function Home({ events, onCreate, onOpen, onJoinRoomCode }: Props) {
   return (
     <>
       <section className="hero">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="hero-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h1>Multi-Device Attendance for Google Meetings</h1>
+            <h1>Multi-Device Attendance</h1>
             <p>
-              Import rosters from multiple Google Sheet links, take attendance simultaneously across devices with Supabase live sync, and export consolidated reports.
+              Import Google Sheets, sync simultaneously across phones or tablets via live real-time sync, and export consolidated reports.
             </p>
           </div>
           <button
@@ -38,22 +38,25 @@ export function Home({ events, onCreate, onOpen, onJoinRoomCode }: Props) {
             onClick={() => setShowSettings(true)}
             title="Database & Device Settings"
           >
-            ⚙️ Device: {deviceName}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '0.35rem' }}>
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            Device: <strong>{deviceName}</strong>
           </button>
         </div>
 
-        <div className="hero-actions" style={{ marginTop: '1.25rem' }}>
+        <div className="hero-actions">
           <button type="button" className="btn btn-accent" onClick={onCreate}>
-            + Create New Multi-Link Event
+            + Create New Event
           </button>
-
-          <form onSubmit={handleJoinSubmit} className="join-room-form" style={{ display: 'flex', gap: '0.5rem' }}>
+          <form onSubmit={handleJoinSubmit} className="join-room-form">
             <input
               type="text"
-              placeholder="Enter Room Sync Code (e.g. MEET-1234)"
+              placeholder="Sync Code (e.g. MEET-1234)"
               value={roomCodeInput}
               onChange={(e) => setRoomCodeInput(e.target.value)}
-              style={{ width: '260px', textTransform: 'uppercase', fontWeight: 600 }}
+              style={{ width: '230px', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em' }}
             />
             <button type="submit" className="btn btn-primary">
               Join Room
@@ -62,20 +65,22 @@ export function Home({ events, onCreate, onOpen, onJoinRoomCode }: Props) {
         </div>
       </section>
 
-      <div className="section-head" style={{ marginTop: '2rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <div>
-          <h2>Your Events</h2>
-          <p className="muted" style={{ margin: '0.25rem 0 0' }}>
-            {events.length === 0 ? 'No events created yet' : `${events.length} event${events.length === 1 ? '' : 's'}`}
+          <h2 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--jci-navy)', fontSize: '1.4rem' }}>
+            Your Events
+          </h2>
+          <p className="muted" style={{ margin: '0.2rem 0 0', fontSize: '0.85rem' }}>
+            {events.length === 0 ? 'No events recorded' : `${events.length} active meeting${events.length === 1 ? '' : 's'}`}
           </p>
         </div>
       </div>
 
       {sorted.length === 0 ? (
-        <div className="empty">
-          <h3>Start by adding Google Sheet links</h3>
-          <p className="muted">Create an event with 1 or more Google Sheet URLs or uploaded spreadsheets.</p>
-          <button type="button" className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={onCreate}>
+        <div className="panel" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
+          <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--jci-navy)' }}>Start by creating an event</h3>
+          <p className="muted" style={{ marginTop: '0.4rem' }}>Connect Google Sheet URLs or upload CSV and Excel spreadsheets.</p>
+          <button type="button" className="btn btn-primary" style={{ marginTop: '1.25rem' }} onClick={onCreate}>
             Create First Event
           </button>
         </div>
@@ -86,40 +91,39 @@ export function Home({ events, onCreate, onOpen, onJoinRoomCode }: Props) {
             const isEnded = event.status === 'ended'
             const dateLabel = event.date
               ? new Date(event.date + 'T00:00:00').toLocaleDateString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })
               : 'No date'
-
             const listCount = event.lists?.length || 1
 
             return (
               <button
                 key={event.id}
                 type="button"
-                className={`event-row ${isEnded ? 'is-ended' : ''}`}
+                className="event-row"
                 onClick={() => onOpen(event.id)}
               >
                 <div>
                   <div className="event-title-line">
                     <h3>{event.title}</h3>
                     {isEnded ? (
-                      <span className="pill pill-ended">Ended</span>
+                      <span className="badge badge-ended">Ended</span>
                     ) : (
-                      <span className="pill pill-active">Live</span>
+                      <span className="badge badge-active">Live</span>
                     )}
-                    <span className="pill pill-lime">{listCount} Google Link{listCount === 1 ? '' : 's'}</span>
+                    <span className="pill pill-lime">{listCount} Sheet{listCount === 1 ? '' : 's'}</span>
                     {event.syncCode && <span className="pill">Code: {event.syncCode}</span>}
                   </div>
                   <div className="event-meta">
                     <span>{dateLabel}</span>
-                    {event.location && <span>{event.location}</span>}
-                    <span>{event.attendees.length} people</span>
+                    {event.location && <span>• {event.location}</span>}
+                    <span>• {event.attendees.length} members</span>
                   </div>
                 </div>
-                <span className={`pill ${isEnded ? 'pill-neutral' : 'pill-lime'}`}>
-                  {present}/{event.attendees.length} present
+                <span className={`pill ${isEnded ? 'pill-ended' : 'pill-lime'}`} style={{ padding: '0.4rem 0.85rem' }}>
+                  {present} / {event.attendees.length} present
                 </span>
               </button>
             )
