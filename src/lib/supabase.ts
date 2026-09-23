@@ -88,6 +88,26 @@ export function getSupabaseClient(): SupabaseClient | null {
   return supabaseInstance
 }
 
+export async function testSupabaseConnection(): Promise<{ ok: boolean; message: string }> {
+  const client = getSupabaseClient()
+  if (!client) {
+    return { ok: false, message: 'Supabase client is not configured or missing URL/Key.' }
+  }
+
+  try {
+    const { data, error } = await client.from('meetings_events').select('sync_code').limit(1)
+    if (error) {
+      if (error.message.includes('relation') || error.message.includes('schema cache')) {
+        return { ok: true, message: 'Connected to Supabase project! (Run SQL setup script to create meetings_events table)' }
+      }
+      return { ok: false, message: `Supabase Error: ${error.message}` }
+    }
+    return { ok: true, message: `Connected to Supabase Cloud Database! (${data ? data.length : 0} event records found)` }
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'Failed to reach Supabase server.' }
+  }
+}
+
 export interface BroadcastAttendeeMessage {
   type: 'CHECKIN_UPDATE'
   syncCode: string

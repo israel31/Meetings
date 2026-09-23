@@ -19,11 +19,23 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [exportScope, setExportScope] = useState<ExportFilter>('all')
   const [selectedListId, setSelectedListId] = useState<string>('all')
+  const [selectedFamily, setSelectedFamily] = useState<string>('all')
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
 
   const isEnded = event.status === 'ended'
   const deviceName = getDeviceName()
+
+  const familyGroups = useMemo(() => {
+    const set = new Set<string>()
+    event.attendees.forEach((a) => {
+      const fam = (a.familyName || '').trim()
+      if (fam && fam.toUpperCase() !== 'NIL' && fam !== '—') {
+        set.add(fam)
+      }
+    })
+    return Array.from(set).sort()
+  }, [event.attendees])
 
   useEffect(() => {
     if (!event.syncCode) return
@@ -64,6 +76,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
     const q = query.trim().toLowerCase()
     return event.attendees.filter((a) => {
       if (selectedListId !== 'all' && a.listId !== selectedListId) return false
+      if (selectedFamily !== 'all' && (a.familyName || '').trim() !== selectedFamily) return false
       if (filter === 'present' && !a.present) return false
       if (filter === 'absent' && a.present) return false
       if (!q) return true
@@ -76,7 +89,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         a.externalId.toLowerCase().includes(q)
       )
     })
-  }, [event.attendees, selectedListId, query, filter])
+  }, [event.attendees, selectedListId, selectedFamily, query, filter])
 
   function toggle(attendeeId: string) {
     const now = new Date().toISOString()
@@ -284,13 +297,28 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
         </div>
       </div>
 
-      <div className="toolbar" style={{ marginTop: '1.25rem' }}>
+      <div className="toolbar" style={{ marginTop: '1.25rem', gap: '0.65rem' }}>
         <input
           type="search"
-          placeholder="Search name, family name, email, or phone..."
+          placeholder="Search name, family group, email, or phone..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          style={{ flex: 1, minWidth: '220px' }}
         />
+        {familyGroups.length > 0 && (
+          <select
+            value={selectedFamily}
+            onChange={(e) => setSelectedFamily(e.target.value)}
+            style={{ width: 'auto', padding: '0.45rem 0.75rem', fontSize: '0.84rem' }}
+          >
+            <option value="all">All Family Groups ({familyGroups.length})</option>
+            {familyGroups.map((fam) => (
+              <option key={fam} value={fam}>
+                {fam}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="filter-group">
           {(['all', 'present', 'absent'] as Filter[]).map((f) => (
             <button
@@ -318,7 +346,7 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
       {filtered.length === 0 ? (
         <div className="panel" style={{ marginTop: '1rem', padding: '2.5rem 1rem', textAlign: 'center' }}>
           <h3 style={{ margin: 0, color: 'var(--jci-navy)', fontFamily: 'var(--font-heading)' }}>No matching attendees</h3>
-          <p className="muted" style={{ marginTop: '0.35rem' }}>Try adjusting your search query or list filter.</p>
+          <p className="muted" style={{ marginTop: '0.35rem' }}>Try adjusting your search query, family group, or status filter.</p>
         </div>
       ) : (
         <div className="attendee-list" style={{ marginTop: '1rem' }}>
@@ -336,8 +364,28 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
                   </svg>
                 ) : null}
               </button>
-              <div className="attendee-info">
-                <h4>{a.fullName}</h4>
+              <div className="attendee-info" style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <h4 style={{ margin: 0 }}>{a.fullName}</h4>
+                  {a.familyName && a.familyName.toUpperCase() !== 'NIL' && a.familyName !== '—' && (
+                    <span className="pill pill-lime" style={{ fontSize: '0.74rem', padding: '0.15rem 0.5rem' }}>
+                      Group: {a.familyName}
+                    </span>
+                  )}
+                  {a.financialMember && a.financialMember !== '—' && (
+                    <span
+                      className={`pill ${a.financialMember.toLowerCase() === 'yes' ? 'pill-lime' : ''}`}
+                      style={{ fontSize: '0.74rem', padding: '0.15rem 0.5rem' }}
+                    >
+                      {a.financialMember.toLowerCase() === 'yes' ? 'Financial' : `Dues: ${a.financialMember}`}
+                    </span>
+                  )}
+                </div>
+                <div className="muted" style={{ marginTop: '0.25rem', fontSize: '0.8rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  {a.email && <span>✉ {a.email}</span>}
+                  {a.phone && <span>📞 {a.phone}</span>}
+                  {a.status && a.status !== 'Member' && <span>🏷 {a.status}</span>}
+                </div>
               </div>
               <button
                 type="button"

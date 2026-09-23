@@ -304,11 +304,17 @@ export function CreateEvent({ onCancel, onCreate }: Props) {
                   </p>
                 )}
 
-                {entry.attendees.length > 0 && (
-                  <p style={{ margin: '0.5rem 0 0', color: '#0b6b6b', fontWeight: 600, fontSize: '0.84rem' }}>
-                    ✓ Loaded {entry.attendees.length} attendees for "{entry.name}"
-                  </p>
-                )}
+                {entry.attendees.length > 0 && (() => {
+                  const tabs = Array.from(new Set(entry.attendees.map((a) => a.listName)))
+                  return (
+                    <div style={{ margin: '0.5rem 0 0' }}>
+                      <p style={{ margin: 0, color: '#0b6b6b', fontWeight: 600, fontSize: '0.85rem' }}>
+                        ✓ Loaded {entry.attendees.length} unique attendees
+                        {tabs.length > 1 ? ` across ${tabs.length} tabs (${tabs.map(t => t.replace(/.*\((.*)\)/, '$1')).slice(0, 5).join(', ')}${tabs.length > 5 ? '...' : ''})` : ''}
+                      </p>
+                    </div>
+                  )
+                })()}
               </div>
             ))}
           </div>

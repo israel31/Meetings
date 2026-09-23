@@ -8,14 +8,56 @@ const FULL_NAME_KEYS = [
   'full name',
   'fullname name',
   'fullname',
+  'suname first',
+  'surname first',
   'name',
   'attendee',
   'participant',
   'member name',
+  'names',
+  'student name',
+  'member',
+  'participant name',
+  'attendee name',
 ]
-const FAMILY_NAME_KEYS = ['family name', 'surname', 'last name', 'family']
-const EMAIL_KEYS = ['email address', 'email', 'e-mail', 'mail', 'e mail']
-const STATUS_KEYS = ['status', 'membership status', 'role', 'type', 'category']
+
+const FIRST_NAME_KEYS = ['first name', 'firstname', 'given name', 'other names', 'first']
+const LAST_NAME_KEYS = ['last name', 'lastname', 'surname']
+
+const FAMILY_NAME_KEYS = [
+  'family name',
+  'family',
+  'house',
+  'family/house',
+  'family group',
+  'family head',
+  'group',
+]
+
+const EMAIL_KEYS = [
+  'email address',
+  'email',
+  'e mail',
+  'e-mail',
+  'mail',
+  'contact email',
+  'user email',
+  'email id',
+]
+
+const STATUS_KEYS = [
+  'status',
+  'membership status',
+  'role',
+  'type',
+  'category',
+  'year joined',
+  'active',
+  'active?',
+  'designation',
+  'position',
+]
+
 const PHONE_KEYS = [
   'phone number',
   'phone',
@@ -24,15 +66,23 @@ const PHONE_KEYS = [
   'contact',
   'telephone',
   'phone no',
+  'phone#',
+  'whatsapp',
+  'tel',
+  'contact number',
 ]
+
 const FINANCIAL_KEYS = [
   'financial member',
+  'financial status',
   'financial',
   'dues paid',
   'paid member',
-  'financial status',
+  'financial?',
   'paid',
+  'dues',
 ]
+
 const ID_KEYS = [
   'id',
   'member id',
@@ -48,98 +98,339 @@ const ID_KEYS = [
   'sn',
   's/n',
   's_n',
+  '#',
+  'no.',
+  's.n.',
 ]
 
-function normalizeHeader(value: string): string {
-  return value.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
+function normalizeHeader(str: unknown): string {
+  return String(str || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/suname/g, 'surname')
 }
 
-function pickColumn(headers: string[], candidates: string[]): string | undefined {
-  const normalized = headers.map((h) => ({ raw: h, key: normalizeHeader(h) }))
-  for (const candidate of candidates) {
-    const match = normalized.find((h) => h.key === candidate)
-    if (match) return match.raw
+function findHeaderRow(matrix: unknown[][]): { headerRowIdx: number; score: number } {
+  let bestRowIdx = -1
+  let maxScore = 0
+
+  for (let r = 0; r < Math.min(25, matrix.length); r++) {
+    const row = matrix[r]
+    if (!Array.isArray(row)) continue
+
+    let score = 0
+    for (const cell of row) {
+      const norm = normalizeHeader(cell)
+      if (!norm) continue
+      if (FULL_NAME_KEYS.some((k) => norm.includes(k))) score += 3
+      if (FAMILY_NAME_KEYS.some((k) => norm.includes(k))) score += 2
+      if (EMAIL_KEYS.some((k) => norm.includes(k))) score += 3
+      if (PHONE_KEYS.some((k) => norm.includes(k))) score += 2
+      if (FINANCIAL_KEYS.some((k) => norm.includes(k))) score += 2
+      if (STATUS_KEYS.some((k) => norm.includes(k))) score += 1
+      if (ID_KEYS.some((k) => norm.includes(k))) score += 1
+    }
+
+    // Check if next row completes missing header cells (e.g. cell in r is empty, next row has "Email Address")
+    if (r + 1 < matrix.length) {
+      const nextRow = matrix[r + 1]
+      if (Array.isArray(nextRow)) {
+        for (let c = 0; c < row.length; c++) {
+          if (!row[c] && nextRow[c]) {
+            const normNext = normalizeHeader(nextRow[c])
+            if (
+              EMAIL_KEYS.some((k) => normNext.includes(k)) ||
+              FULL_NAME_KEYS.some((k) => normNext.includes(k))
+            ) {
+              score += 2
+            }
+          }
+        }
+      }
+    }
+
+    if (score > maxScore) {
+      maxScore = score
+      bestRowIdx = r
+    }
   }
-  for (const candidate of candidates) {
-    const match = normalized.find((h) => h.key.includes(candidate) || candidate.includes(h.key))
-    if (match) return match.raw
+
+  return { headerRowIdx: bestRowIdx, score: maxScore }
+}
+
+function matchColumn(headers: string[], keywords: string[]): number {
+  const normHeaders = headers.map((h) => normalizeHeader(h))
+
+  // 1. Exact match
+  for (const kw of keywords) {
+    const idx = normHeaders.findIndex((h) => h && h === kw)
+    if (idx !== -1) return idx
   }
-  return undefined
+  // 2. Substring match (header contains keyword)
+  for (const kw of keywords) {
+    const idx = normHeaders.findIndex((h) => h && h.length >= 2 && h.includes(kw))
+    if (idx !== -1) return idx
+  }
+  // 3. Keyword contains header (only if header is meaningful length >= 3)
+  for (const kw of keywords) {
+    const idx = normHeaders.findIndex((h) => h && h.length >= 3 && kw.includes(h))
+    if (idx !== -1) return idx
+  }
+  return -1
 }
 
-function cell(row: Record<string, unknown>, key?: string): string {
-  if (!key) return ''
-  const value = row[key]
-  if (value == null) return ''
-  return String(value).trim()
+function inferColumnsFromContent(matrix: unknown[][]): {
+  fullNameIdx: number
+  emailIdx: number
+  phoneIdx: number
+  financialIdx: number
+} {
+  let emailIdx = -1
+  let phoneIdx = -1
+  let fullNameIdx = -1
+  let financialIdx = -1
+
+  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/
+  const phoneRegex = /^\+?\d[\d\s\-()]{6,}\d$/
+  const financialRegex = /^(yes|no|paid|unpaid|financial|active|true|false)$/i
+
+  const colScores: Record<number, { email: number; phone: number; name: number; financial: number }> = {}
+
+  const sampleRows = matrix.slice(0, 20)
+  sampleRows.forEach((row) => {
+    if (!Array.isArray(row)) return
+    row.forEach((cell, colIdx) => {
+      const val = String(cell || '').trim()
+      if (!val) return
+
+      if (!colScores[colIdx]) {
+        colScores[colIdx] = { email: 0, phone: 0, name: 0, financial: 0 }
+      }
+
+      if (emailRegex.test(val)) {
+        colScores[colIdx].email++
+      } else if (phoneRegex.test(val)) {
+        colScores[colIdx].phone++
+      } else if (financialRegex.test(val)) {
+        colScores[colIdx].financial++
+      } else if (val.includes(' ') && /^[a-zA-Z\s,.'-]+$/.test(val) && val.length >= 4) {
+        colScores[colIdx].name++
+      }
+    })
+  })
+
+  let maxEmail = 0
+  let maxPhone = 0
+  let maxName = 0
+  let maxFinancial = 0
+
+  Object.entries(colScores).forEach(([cStr, scores]) => {
+    const colIdx = Number(cStr)
+    if (scores.email > maxEmail) {
+      maxEmail = scores.email
+      emailIdx = colIdx
+    }
+    if (scores.phone > maxPhone) {
+      maxPhone = scores.phone
+      phoneIdx = colIdx
+    }
+    if (scores.name > maxName) {
+      maxName = scores.name
+      fullNameIdx = colIdx
+    }
+    if (scores.financial > maxFinancial) {
+      maxFinancial = scores.financial
+      financialIdx = colIdx
+    }
+  })
+
+  return { fullNameIdx, emailIdx, phoneIdx, financialIdx }
 }
 
-export function rowsToAttendees(
-  rows: Record<string, unknown>[],
-  listId: string = 'default-list',
-  listName: string = 'Main Roster',
+function parseSheetMatrix(
+  matrix: unknown[][],
+  sheetName: string,
+  listId: string,
+  baseListName: string,
+  totalSheetsCount: number,
 ): Attendee[] {
-  if (rows.length === 0) {
-    throw new Error('No rows found in the spreadsheet.')
-  }
+  if (matrix.length === 0) return []
 
-  const headers = Object.keys(rows[0] ?? {})
-  if (headers.length === 0) {
-    throw new Error('Could not read column headers from the spreadsheet.')
-  }
+  const { headerRowIdx, score } = findHeaderRow(matrix)
 
-  const fullNameCol = pickColumn(headers, FULL_NAME_KEYS)
-  const familyNameCol = pickColumn(headers, FAMILY_NAME_KEYS)
-  const emailCol = pickColumn(headers, EMAIL_KEYS)
-  const statusCol = pickColumn(headers, STATUS_KEYS)
-  const phoneCol = pickColumn(headers, PHONE_KEYS)
-  const financialCol = pickColumn(headers, FINANCIAL_KEYS)
-  const idCol = pickColumn(headers, ID_KEYS)
+  let fullNameIdx = -1
+  let firstNameIdx = -1
+  let lastNameIdx = -1
+  let familyNameIdx = -1
+  let emailIdx = -1
+  let phoneIdx = -1
+  let financialIdx = -1
+  let statusIdx = -1
+  let idIdx = -1
+  let startDataRow = 0
 
-  if (!fullNameCol && !emailCol && !idCol) {
-    throw new Error(
-      'Could not find Name, Email, or ID columns. Expecting columns like FULL NAME ( SUNAME FIRST ), EMAIL ADDRESS, etc.',
-    )
+  if (headerRowIdx >= 0 && score >= 2) {
+    let rawHeaders = matrix[headerRowIdx].map((c) => String(c || '').trim())
+
+    // Merge headers if next row contains labels in empty cells
+    if (headerRowIdx + 1 < matrix.length) {
+      const nextRow = matrix[headerRowIdx + 1]
+      if (Array.isArray(nextRow)) {
+        rawHeaders = rawHeaders.map((h, i) => {
+          if (h) return h
+          const nextVal = String(nextRow[i] || '').trim()
+          const norm = normalizeHeader(nextVal)
+          if (
+            norm &&
+            (EMAIL_KEYS.includes(norm) ||
+              FULL_NAME_KEYS.includes(norm) ||
+              FAMILY_NAME_KEYS.includes(norm))
+          ) {
+            return nextVal
+          }
+          return h
+        })
+      }
+    }
+
+    fullNameIdx = matchColumn(rawHeaders, FULL_NAME_KEYS)
+    firstNameIdx = matchColumn(rawHeaders, FIRST_NAME_KEYS)
+    lastNameIdx = matchColumn(rawHeaders, LAST_NAME_KEYS)
+    familyNameIdx = matchColumn(rawHeaders, FAMILY_NAME_KEYS)
+    emailIdx = matchColumn(rawHeaders, EMAIL_KEYS)
+    phoneIdx = matchColumn(rawHeaders, PHONE_KEYS)
+    financialIdx = matchColumn(rawHeaders, FINANCIAL_KEYS)
+    statusIdx = matchColumn(rawHeaders, STATUS_KEYS)
+    idIdx = matchColumn(rawHeaders, ID_KEYS)
+    startDataRow = headerRowIdx + 1
+  } else {
+    // Fallback: Infer columns from data content
+    const inferred = inferColumnsFromContent(matrix)
+    fullNameIdx = inferred.fullNameIdx
+    emailIdx = inferred.emailIdx
+    phoneIdx = inferred.phoneIdx
+    financialIdx = inferred.financialIdx
+    startDataRow = 0
   }
 
   const attendees: Attendee[] = []
-  const seen = new Set<string>()
+  const dataRows = matrix.slice(startDataRow)
 
-  rows.forEach((row, index) => {
-    const fullName = cell(row, fullNameCol)
-    const familyName = cell(row, familyNameCol)
-    const email = cell(row, emailCol)
-    const status = cell(row, statusCol)
-    const phone = cell(row, phoneCol)
-    const financialMember = cell(row, financialCol)
-    const externalId = cell(row, idCol)
+  const effectiveListName =
+    totalSheetsCount > 1 ? `${baseListName} (${sheetName})` : baseListName
 
-    if (!fullName && !email && !externalId) return
+  dataRows.forEach((row, idx) => {
+    if (!Array.isArray(row)) return
 
-    const dedupeKey = `${externalId}|${email}|${fullName}`.toLowerCase()
-    if (seen.has(dedupeKey)) return
-    seen.add(dedupeKey)
+    const getVal = (i: number) => (i >= 0 && row[i] != null ? String(row[i]).trim() : '')
+
+    let fullName = getVal(fullNameIdx)
+    const firstName = getVal(firstNameIdx)
+    const lastName = getVal(lastNameIdx)
+    const familyName = getVal(familyNameIdx)
+    let email = getVal(emailIdx)
+    const phone = getVal(phoneIdx)
+    const financialMember = getVal(financialIdx)
+    const status = getVal(statusIdx)
+    const externalId = getVal(idIdx)
+
+    // Filter out rows that duplicate column header text in data cells
+    const emailLower = email.toLowerCase()
+    const nameLower = fullName.toLowerCase()
+    if (
+      emailLower === 'email address' ||
+      emailLower === 'email' ||
+      nameLower === 'full name' ||
+      nameLower === 'name'
+    ) {
+      return
+    }
+
+    // Combine first & last name if full name not present (never combine family group name)
+    if (!fullName && (firstName || lastName)) {
+      fullName = [firstName, lastName].filter(Boolean).join(' ')
+    }
+
+    // Filter out template / example placeholder rows
+    if (nameLower.startsWith('e.g.') || emailLower.startsWith('e.g.') || nameLower.includes('example.com')) {
+      return
+    }
+
+    // Skip blank or garbage rows
+    if (!fullName && !email && !externalId && !phone) return
+
+    // Clean email check (if email field has no @, reset if it's not a real email)
+    if (email && !email.includes('@')) {
+      email = ''
+    }
+
+    // Synthesize display name if missing
+    if (!fullName && email) {
+      const handle = email.split('@')[0] || ''
+      fullName = handle.replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    }
 
     attendees.push({
       id: crypto.randomUUID(),
-      fullName: fullName || email || `Attendee ${index + 1}`,
+      fullName: fullName || `Attendee ${idx + 1}`,
       familyName: familyName || '',
       email: email || '',
       status: status || 'Member',
       phone: phone || '',
       financialMember: financialMember || '—',
-      externalId: externalId || String(index + 1),
+      externalId: externalId || String(idx + 1),
       present: false,
       listId,
-      listName,
+      listName: effectiveListName,
     })
   })
 
-  if (attendees.length === 0) {
-    throw new Error('Spreadsheet has headers but no valid attendee rows.')
+  return attendees
+}
+
+function parseWorkbook(
+  buffer: ArrayBuffer,
+  listId: string = 'default-list',
+  baseListName: string = 'Main Roster',
+): Attendee[] {
+  const workbook = XLSX.read(buffer, { type: 'array' })
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    throw new Error('Workbook has no sheets.')
   }
 
-  return attendees
+  const allAttendees: Attendee[] = []
+  const totalSheets = workbook.SheetNames.length
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName]
+    if (!sheet) continue
+
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' })
+    const parsed = parseSheetMatrix(matrix, sheetName, listId, baseListName, totalSheets)
+    allAttendees.push(...parsed)
+  }
+
+  if (allAttendees.length === 0) {
+    throw new Error('No valid attendee data could be extracted from any sheet in the file.')
+  }
+
+  // Deduplicate across sheets within this workbook
+  const seen = new Set<string>()
+  const deduped: Attendee[] = []
+
+  for (const attendee of allAttendees) {
+    const key = attendee.email
+      ? attendee.email.toLowerCase()
+      : `${attendee.fullName}|${attendee.phone}`.toLowerCase()
+
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(attendee)
+  }
+
+  return deduped
 }
 
 function parseCsvText(
@@ -147,33 +438,28 @@ function parseCsvText(
   listId: string = 'default-list',
   listName: string = 'Main Roster',
 ): Attendee[] {
-  const parsed = Papa.parse<Record<string, unknown>>(text, {
-    header: true,
+  const parsed = Papa.parse<unknown[]>(text, {
+    header: false,
     skipEmptyLines: true,
-    transformHeader: (h) => h.trim(),
   })
 
   if (parsed.errors.length > 0 && parsed.data.length === 0) {
     throw new Error(parsed.errors[0]?.message || 'Failed to parse CSV.')
   }
 
-  return rowsToAttendees(parsed.data, listId, listName)
+  const matrix = parsed.data
+  const attendees = parseSheetMatrix(matrix, 'CSV', listId, listName, 1)
+
+  if (attendees.length === 0) {
+    throw new Error('No valid attendee rows found in the CSV.')
+  }
+
+  return attendees
 }
 
-function parseWorkbook(
-  buffer: ArrayBuffer,
-  listId: string = 'default-list',
-  listName: string = 'Main Roster',
-): Attendee[] {
-  const workbook = XLSX.read(buffer, { type: 'array' })
-  const sheetName = workbook.SheetNames[0]
-  if (!sheetName) throw new Error('Workbook has no sheets.')
-  const sheet = workbook.Sheets[sheetName]
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
-  return rowsToAttendees(rows, listId, listName)
-}
-
-/** Convert common Google Sheets / Excel Online URLs into downloadable CSV candidate URLs. */
+/** Convert common Google Sheets / Excel Online URLs into downloadable candidate URLs.
+ *  Prioritizes XLSX format to download all worksheet tabs in one go!
+ */
 export function getSpreadsheetCandidateUrls(rawUrl: string): string[] {
   const url = rawUrl.trim()
 
@@ -182,6 +468,7 @@ export function getSpreadsheetCandidateUrls(rawUrl: string): string[] {
   if (pubMatch) {
     const pubId = pubMatch[1]
     return [
+      `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?output=xlsx`,
       `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?output=csv`,
       url,
     ]
@@ -192,11 +479,21 @@ export function getSpreadsheetCandidateUrls(rawUrl: string): string[] {
   if (sheetsMatch) {
     const id = sheetsMatch[1]
     const gidMatch = url.match(/[#&?]gid=([0-9]+)/)
-    const gid = gidMatch?.[1] ?? '0'
-    return [
-      `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`,
-      `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`,
+    const gid = gidMatch?.[1]
+
+    const candidates = [
+      `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`,
     ]
+
+    if (gid) {
+      candidates.push(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`)
+      candidates.push(`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`)
+    } else {
+      candidates.push(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv`)
+      candidates.push(`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv`)
+    }
+
+    return candidates
   }
 
   return [url]
@@ -260,12 +557,12 @@ async function fetchSpreadsheetBytes(rawUrl: string): Promise<{ buffer: ArrayBuf
 
   if (detectedLoginHtml) {
     throw new Error(
-      'This Google Sheet is private or requires login. Please open the sheet in Google Sheets, click "Share" → set Access to "Anyone with the link" (Viewer), or download as CSV and upload the file.',
+      'This Google Sheet is private or requires login. Please open the sheet in Google Sheets, click "Share" → set Access to "Anyone with the link" (Viewer), or download as XLSX/CSV and upload the file.',
     )
   }
 
   throw new Error(
-    'Could not access the spreadsheet URL (CORS/Network error). Ensure sheet sharing is set to "Anyone with the link", or click "File → Download → CSV" in Google Sheets and upload the file.',
+    'Could not access the spreadsheet URL (CORS/Network error). Ensure sheet sharing is set to "Anyone with the link", or click "File → Download → XLSX or CSV" in Google Sheets and upload the file.',
   )
 }
 
@@ -276,17 +573,22 @@ export async function parseSpreadsheetUrl(
 ): Promise<Attendee[]> {
   const { buffer, contentType } = await fetchSpreadsheetBytes(rawUrl)
 
-  if (
-    contentType.includes('spreadsheet') ||
-    contentType.includes('excel') ||
-    rawUrl.toLowerCase().includes('.xlsx') ||
-    rawUrl.toLowerCase().includes('.xls')
-  ) {
+  // Try parsing as workbook first if it's binary / xlsx / zip format or standard workbook
+  try {
     return parseWorkbook(buffer, listId, listName)
+  } catch (err) {
+    if (
+      contentType.includes('spreadsheet') ||
+      contentType.includes('excel') ||
+      rawUrl.toLowerCase().includes('.xlsx') ||
+      rawUrl.toLowerCase().includes('.xls')
+    ) {
+      throw err
+    }
+    // Fall back to CSV text parsing if workbook reading fails
+    const text = new TextDecoder().decode(buffer)
+    return parseCsvText(text, listId, listName)
   }
-
-  const text = new TextDecoder().decode(buffer)
-  return parseCsvText(text, listId, listName)
 }
 
 export type ExportFilter = 'all' | 'present' | 'absent'
@@ -311,7 +613,7 @@ export function exportAttendanceCsv(
   const filtered = filterAttendees(attendees, filter)
   const rows = filtered.map((a) => ({
     'EMAIL ADDRESS': a.email,
-    'FULL NAME ( SUNAME FIRST )': a.fullName,
+    'FULL NAME ( SURNAME FIRST )': a.fullName,
     'FAMILY NAME': a.familyName,
     'PHONE NUMBER': a.phone,
     'FINANCIAL MEMBER': a.financialMember,
@@ -340,7 +642,7 @@ export function exportAttendanceXlsx(
 
   const rows = filtered.map((a) => ({
     'EMAIL ADDRESS': a.email,
-    'FULL NAME ( SUNAME FIRST )': a.fullName,
+    'FULL NAME ( SURNAME FIRST )': a.fullName,
     'FAMILY NAME': a.familyName,
     'PHONE NUMBER': a.phone,
     'FINANCIAL MEMBER': a.financialMember,
@@ -356,7 +658,7 @@ export function exportAttendanceXlsx(
 
   worksheet['!cols'] = [
     { wch: 28 }, // EMAIL ADDRESS
-    { wch: 30 }, // FULL NAME ( SUNAME FIRST )
+    { wch: 30 }, // FULL NAME ( SURNAME FIRST )
     { wch: 20 }, // FAMILY NAME
     { wch: 18 }, // PHONE NUMBER
     { wch: 18 }, // FINANCIAL MEMBER
