@@ -1,12 +1,31 @@
-import { createClient, RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
-import type { EventRecord, SupabaseConfig } from '../types'
+import {
+  createClient,
+  type SupabaseClient,
+} from '@supabase/supabase-js'
+
+import type {
+  Attendee,
+  EventRecord,
+  SupabaseConfig,
+} from '../types'
+
+import {
+  loadPendingOperations,
+  savePendingOperations,
+  type PendingSyncOperation,
+} from './storage'
 
 const CONFIG_STORAGE_KEY = 'meetings_supabase_config_v1'
 const DEVICE_ID_KEY = 'meetings_device_id_v1'
 const DEVICE_NAME_KEY = 'meetings_device_name_v1'
 
-const DEFAULT_SUPABASE_URL = 'https://ekoylhztqkxjpntyjkym.supabase.co'
-const DEFAULT_SUPABASE_KEY = 'sb_publishable_QeTkM3_Lw0zVrw17LqMCkA_DXVIJAlu'
+const DEFAULT_SUPABASE_URL =
+  'https://ekoylhztqkxjpntyjkym.supabase.co'
+
+const DEFAULT_SUPABASE_KEY =
+  'sb_publishable_QeTkM3_Lw0zVrw17LqMCkA_DXVIJAlu'
+
+let supabaseInstance: SupabaseClient | null = null
 
 export function getStoredSupabaseConfig(): SupabaseConfig | null {
   try {
@@ -22,36 +41,48 @@ export function saveSupabaseConfig(config: SupabaseConfig | null): void {
   if (!config) {
     localStorage.removeItem(CONFIG_STORAGE_KEY)
   } else {
-    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config))
+    localStorage.setItem(
+      CONFIG_STORAGE_KEY,
+      JSON.stringify(config),
+    )
   }
+
+  // Recreate the client if settings change.
+  supabaseInstance = null
 }
 
 export function getDeviceId(): string {
   let id = localStorage.getItem(DEVICE_ID_KEY)
+
   if (!id) {
-    id = 'dev-' + crypto.randomUUID().slice(0, 8)
+    id = 'dev-' + crypto.randomUUID()
     localStorage.setItem(DEVICE_ID_KEY, id)
   }
+
   return id
 }
 
 export function getDeviceName(): string {
   let name = localStorage.getItem(DEVICE_NAME_KEY)
+
   if (!name) {
     const platform =
       typeof navigator !== 'undefined' && navigator.platform
         ? navigator.platform.includes('Win')
           ? 'Windows'
           : navigator.platform.includes('Mac')
-          ? 'Mac'
-          : /Android|iPhone|iPad/i.test(navigator.userAgent)
-          ? 'Mobile Device'
-          : 'Device'
+            ? 'Mac'
+            : /Android|iPhone|iPad/i.test(navigator.userAgent)
+              ? 'Mobile Device'
+              : 'Device'
         : 'Device'
+
     const rand = Math.floor(100 + Math.random() * 900)
+
     name = `${platform} (${rand})`
     localStorage.setItem(DEVICE_NAME_KEY, name)
   }
+
   return name
 }
 
@@ -59,308 +90,426 @@ export function setDeviceName(name: string): void {
   localStorage.setItem(DEVICE_NAME_KEY, name)
 }
 
-let supabaseInstance: SupabaseClient | null = null
-
 export function getSupabaseClient(): SupabaseClient | null {
   const config = getStoredSupabaseConfig()
+
   const url =
     config?.url ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) ||
+    import.meta.env.VITE_SUPABASE_URL ||
     DEFAULT_SUPABASE_URL
+
   const key =
     config?.anonKey ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) ||
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
     DEFAULT_SUPABASE_KEY
 
-  if (!url || !key || url.includes('your-project') || url.includes('xyzcompany')) {
-    return null
-  }
+  if (!url || !key) return null
 
   if (!supabaseInstance) {
     try {
       supabaseInstance = createClient(url, key, {
-        auth: { persistSession: false },
+        auth: {
+          persistSession: false,
+        },
       })
-    } catch {
+    } catch (error) {
+      console.error('Could not initialize Supabase:', error)
       supabaseInstance = null
     }
   }
+
   return supabaseInstance
 }
 
-export async function testSupabaseConnection(): Promise<{ ok: boolean; message: string }> {
+export async function testSupabaseConnection(): Promise<{
+  ok: boolean
+  message: string
+}> {
   const client = getSupabaseClient()
+
   if (!client) {
-    return { ok: false, message: 'Supabase client is not configured or missing URL/Key.' }
+    return {
+      ok: false,
+      message: 'Supabase client is not configured.',
+    }
   }
 
   try {
-    const { data, error } = await client.from('meetings_events').select('sync_code').limit(1)
+    const { data, error } = await client
+      .from('meetings_events')
+      .select('sync_code')
+      .limit(1)
+
     if (error) {
-      if (error.message.includes('relation') || error.message.includes('schema cache')) {
-        return { ok: true, message: 'Connected to Supabase project! (Run SQL setup script to create meetings_events table)' }
+      return {
+        ok: false,
+        message: `Supabase Error: ${error.message}`,
       }
-      return { ok: false, message: `Supabase Error: ${error.message}` }
     }
-    return { ok: true, message: `Connected to Supabase Cloud Database! (${data ? data.length : 0} event records found)` }
-  } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : 'Failed to reach Supabase server.' }
+
+    return {
+      ok: true,
+      message: `Connected. ${data?.length ?? 0} event records found.`,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Could not reach Supabase.',
+    }
   }
 }
 
-export interface BroadcastAttendeeMessage {
-  type: 'CHECKIN_UPDATE'
-  syncCode: string
-  attendeeId: string
-  present: boolean
-  checkedInAt?: string
-  checkedInBy: string
+interface BackgroundSyncOptions {
+  getEvents: () => EventRecord[]
+  onRemoteEvent: (event: EventRecord) => void
+  onRemoteDeleted: (syncCode: string) => void
 }
-
-export interface BroadcastFullSyncMessage {
-  type: 'FULL_EVENT_SYNC'
-  syncCode: string
-  event: EventRecord
-}
-
-export interface BroadcastRequestSyncMessage {
-  type: 'REQUEST_SYNC'
-  syncCode: string
-  requestingDevice: string
-}
-
-export type SyncMessage =
-  | BroadcastAttendeeMessage
-  | BroadcastFullSyncMessage
-  | BroadcastRequestSyncMessage
-
-type SyncCallback = (msg: SyncMessage) => void
 
 class MeetingSyncManager {
-  private activeChannels: Map<string, RealtimeChannel> = new Map()
-  private broadcastChannels: Map<string, BroadcastChannel> = new Map()
+  private syncing = false
 
-  /** Attempt to fetch event data from Supabase Cloud DB table if available */
-  async fetchEventFromCloud(syncCode: string): Promise<EventRecord | null> {
+  private addOperation(operation: PendingSyncOperation): void {
+    const operations = loadPendingOperations()
+
+    operations.push(operation)
+
+    savePendingOperations(operations)
+  }
+
+  enqueueCreate(event: EventRecord): void {
+    this.addOperation({
+      id: crypto.randomUUID(),
+      syncCode: event.syncCode,
+      createdAt: new Date().toISOString(),
+      kind: 'create_event',
+      event,
+    })
+  }
+
+  enqueueDelete(event: EventRecord): void {
+    this.addOperation({
+      id: crypto.randomUUID(),
+      syncCode: event.syncCode,
+      createdAt: new Date().toISOString(),
+      kind: 'delete_event',
+    })
+  }
+
+  enqueueEventChanges(
+    previous: EventRecord,
+    updated: EventRecord,
+  ): void {
+    const previousAttendees = new Map(
+      previous.attendees.map((attendee) => [
+        attendee.id,
+        attendee,
+      ]),
+    )
+
+    const updatedAttendees = new Map(
+      updated.attendees.map((attendee) => [
+        attendee.id,
+        attendee,
+      ]),
+    )
+
+    // Queue changed or newly added attendees individually.
+    updated.attendees.forEach((attendee) => {
+      const oldAttendee = previousAttendees.get(attendee.id)
+
+      if (
+        !oldAttendee ||
+        JSON.stringify(oldAttendee) !== JSON.stringify(attendee)
+      ) {
+        this.addOperation({
+          id: crypto.randomUUID(),
+          syncCode: updated.syncCode,
+          createdAt: new Date().toISOString(),
+          kind: 'attendee_upsert',
+          attendee,
+        })
+      }
+    })
+
+    // Queue removed attendees individually.
+    previous.attendees.forEach((attendee) => {
+      if (!updatedAttendees.has(attendee.id)) {
+        this.addOperation({
+          id: crypto.randomUUID(),
+          syncCode: updated.syncCode,
+          createdAt: new Date().toISOString(),
+          kind: 'attendee_delete',
+          attendeeId: attendee.id,
+        })
+      }
+    })
+
+    // Queue event details separately from the attendee roster.
+    const fields: Array<keyof EventRecord> = [
+      'title',
+      'date',
+      'location',
+      'notes',
+      'sourceLabel',
+      'lists',
+      'status',
+      'endedAt',
+      'updatedAt',
+    ]
+
+    const patch: Partial<EventRecord> = {}
+
+    fields.forEach((field) => {
+      if (
+        JSON.stringify(previous[field]) !==
+        JSON.stringify(updated[field])
+      ) {
+        ;(patch as Record<string, unknown>)[field] = updated[field]
+      }
+    })
+
+    if (Object.keys(patch).length > 0) {
+      this.addOperation({
+        id: crypto.randomUUID(),
+        syncCode: updated.syncCode,
+        createdAt: new Date().toISOString(),
+        kind: 'event_patch',
+        patch,
+      })
+    }
+  }
+
+  private operationPayload(
+    operation: PendingSyncOperation,
+  ): Record<string, unknown> {
+    switch (operation.kind) {
+      case 'create_event':
+        return {
+          type: 'create_event',
+          event: operation.event,
+        }
+
+      case 'attendee_upsert':
+        return {
+          type: 'attendee_upsert',
+          attendee: operation.attendee,
+        }
+
+      case 'attendee_delete':
+        return {
+          type: 'attendee_delete',
+          attendeeId: operation.attendeeId,
+        }
+
+      case 'event_patch':
+        return {
+          type: 'event_patch',
+          patch: operation.patch,
+        }
+
+      case 'delete_event':
+        return {
+          type: 'delete_event',
+        }
+    }
+  }
+
+  async flushPendingOperations(): Promise<void> {
+    const client = getSupabaseClient()
+    if (!client) return
+
+    const operations = loadPendingOperations().sort(
+      (a, b) => a.createdAt.localeCompare(b.createdAt),
+    )
+
+    for (const operation of operations) {
+      const { error } = await client.rpc(
+        'apply_meeting_sync_operation',
+        {
+          p_operation_id: operation.id,
+          p_sync_code: operation.syncCode,
+          p_operation: this.operationPayload(operation),
+        },
+      )
+
+      if (error) {
+        console.warn(
+          'Sync operation is still pending:',
+          operation.id,
+          error.message,
+        )
+
+        // Keep this operation and all later operations for retry.
+        break
+      }
+
+      const latest = loadPendingOperations().filter(
+        (item) => item.id !== operation.id,
+      )
+
+      savePendingOperations(latest)
+    }
+  }
+
+  async fetchEventFromCloud(
+    syncCode: string,
+  ): Promise<EventRecord | null> {
     const client = getSupabaseClient()
     if (!client) return null
 
     try {
-      const cleanCode = syncCode.trim().toUpperCase()
       const { data, error } = await client
         .from('meetings_events')
-        .select('*')
-        .eq('sync_code', cleanCode)
-        .single()
+        .select('event_data')
+        .eq('sync_code', syncCode.trim().toUpperCase())
+        .maybeSingle()
 
-      if (error || !data) return null
+      if (error || !data?.event_data) return null
+
       return data.event_data as EventRecord
-    } catch {
+    } catch (error) {
+      console.error('Cloud event fetch failed:', error)
       return null
     }
   }
 
-  /** Attempt to save event data to Supabase Cloud DB table if table exists */
-  async saveEventToCloud(event: EventRecord): Promise<void> {
-    const client = getSupabaseClient()
-    if (!client || !event.syncCode) return
+  applyPendingOperations(
+    remoteEvent: EventRecord,
+  ): EventRecord | null {
+    let event: EventRecord | null = remoteEvent
 
-    try {
-      const cleanCode = event.syncCode.trim().toUpperCase()
-      await client.from('meetings_events').upsert(
-        {
-          sync_code: cleanCode,
-          event_id: event.id,
-          title: event.title,
-          event_data: event,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'sync_code' },
+    const operations = loadPendingOperations()
+      .filter(
+        (operation) =>
+          operation.syncCode.toUpperCase() ===
+          remoteEvent.syncCode.toUpperCase(),
       )
-    } catch {
-      // Graceful fallback if table is not created yet
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+
+    for (const operation of operations) {
+      if (!event) break
+
+      switch (operation.kind) {
+        case 'attendee_upsert': {
+          if (!operation.attendee) break
+
+          const exists = event.attendees.some(
+            (a) => a.id === operation.attendee?.id,
+          )
+
+          event = {
+            ...event,
+            attendees: exists
+              ? event.attendees.map((a) =>
+                  a.id === operation.attendee?.id
+                    ? operation.attendee
+                    : a,
+                )
+              : [...event.attendees, operation.attendee],
+          }
+
+          break
+        }
+
+        case 'attendee_delete':
+          event = {
+            ...event,
+            attendees: event.attendees.filter(
+              (a) => a.id !== operation.attendeeId,
+            ),
+          }
+          break
+
+        case 'event_patch':
+          event = {
+            ...event,
+            ...(operation.patch || {}),
+          }
+          break
+
+        case 'delete_event':
+          event = null
+          break
+
+        case 'create_event':
+          break
+      }
     }
+
+    return event
   }
 
-  async updateAttendeeInCloud(
-  syncCode: string,
-  attendeeId: string,
-  present: boolean,
-  checkedInAt: string | undefined,
-  checkedInBy: string,
-): Promise<boolean> {
-  const client = getSupabaseClient()
-
-  if (!client) {
-    console.error('Supabase client is not configured.')
-    return false
+  hasPendingOperations(syncCode: string): boolean {
+    return loadPendingOperations().some(
+      (operation) =>
+        operation.syncCode.toUpperCase() ===
+        syncCode.toUpperCase(),
+    )
   }
 
-  try {
-    const { data, error } = await client.rpc('update_meeting_attendance', {
-      p_sync_code: syncCode.trim().toUpperCase(),
-      p_attendee_id: attendeeId,
-      p_present: present,
-      p_checked_in_at: checkedInAt ?? null,
-      p_checked_in_by: present ? checkedInBy : null,
-    })
+  startBackgroundSync(
+    options: BackgroundSyncOptions,
+  ): () => void {
+    let stopped = false
 
-    if (error) {
-      console.error('Cloud attendance update failed:', error)
-      return false
-    }
+    const run = async () => {
+      if (this.syncing || stopped) return
 
-    if (!data) {
-      console.error('No matching event was found in the cloud.')
-      return false
-    }
+      this.syncing = true
 
-    return true
-  } catch (error) {
-    console.error('Attendance sync error:', error)
-    return false
-  }
-}
-
-  
-
-  subscribeToSync(syncCode: string, onSync: SyncCallback): () => void {
-    const cleanCode = syncCode.trim().toLowerCase()
-    const channelName = `meeting-room-${cleanCode}`
-
-    let bc: BroadcastChannel | null = null
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
-        bc = new BroadcastChannel(channelName)
-        bc.onmessage = (event) => {
-          if (event.data?.syncCode?.toLowerCase() === cleanCode) {
-            onSync(event.data)
+        // Upload pending changes first.
+        await this.flushPendingOperations()
+
+        if (stopped) return
+
+        // Then retrieve the latest cloud version of each local event.
+        const events = options.getEvents()
+
+        for (const localEvent of events) {
+          if (stopped) break
+
+          const remoteEvent = await this.fetchEventFromCloud(
+            localEvent.syncCode,
+          )
+
+          if (remoteEvent) {
+            const merged = this.applyPendingOperations(remoteEvent)
+
+            if (merged) {
+              options.onRemoteEvent(merged)
+            }
+          } else if (
+            !this.hasPendingOperations(localEvent.syncCode)
+          ) {
+            options.onRemoteDeleted(localEvent.syncCode)
           }
         }
-        this.broadcastChannels.set(cleanCode, bc)
-      } catch {
-        // Fallback
+      } catch (error) {
+        console.error('Background sync failed:', error)
+      } finally {
+        this.syncing = false
       }
     }
 
-    const client = getSupabaseClient()
-    let channel: RealtimeChannel | null = null
+    // Try immediately, then every five seconds.
+    void run()
 
-    if (client) {
-      try {
-        channel = client
-          .channel(channelName, {
-            config: { broadcast: { self: false } },
-          })
-          .on('broadcast', { event: 'ATTENDANCE_EVENT' }, (payload) => {
-            if (payload.payload?.syncCode?.toLowerCase() === cleanCode) {
-              onSync(payload.payload)
-            }
-          })
+    const interval = window.setInterval(() => {
+      void run()
+    }, 5000)
 
-        channel.subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            // Upon joining channel, broadcast sync request
-            this.requestSync(syncCode)
-          }
-        })
-
-        this.activeChannels.set(cleanCode, channel)
-      } catch {
-        // Fallback
-      }
-    }
+    // Retry immediately when internet connectivity returns.
+    window.addEventListener('online', run)
 
     return () => {
-      if (bc) {
-        bc.close()
-        this.broadcastChannels.delete(cleanCode)
-      }
-      if (channel && client) {
-        client.removeChannel(channel)
-        this.activeChannels.delete(cleanCode)
-      }
+      stopped = true
+      window.clearInterval(interval)
+      window.removeEventListener('online', run)
     }
-  }
-
-  requestSync(syncCode: string): void {
-    const cleanCode = syncCode.trim().toLowerCase()
-    const msg: BroadcastRequestSyncMessage = {
-      type: 'REQUEST_SYNC',
-      syncCode,
-      requestingDevice: getDeviceName(),
-    }
-
-    const bc = this.broadcastChannels.get(cleanCode)
-    if (bc) {
-      bc.postMessage(msg)
-    }
-
-    const channel = this.activeChannels.get(cleanCode)
-    if (channel) {
-      void channel.send({
-        type: 'broadcast',
-        event: 'ATTENDANCE_EVENT',
-        payload: msg,
-      })
-    }
-  }
-
-  broadcastCheckIn(
-    syncCode: string,
-    attendeeId: string,
-    present: boolean,
-    checkedInAt?: string,
-  ): void {
-    const cleanCode = syncCode.trim().toLowerCase()
-    const msg: BroadcastAttendeeMessage = {
-      type: 'CHECKIN_UPDATE',
-      syncCode,
-      attendeeId,
-      present,
-      checkedInAt,
-      checkedInBy: getDeviceName(),
-    }
-
-    const bc = this.broadcastChannels.get(cleanCode)
-    if (bc) {
-      bc.postMessage(msg)
-    }
-
-    const channel = this.activeChannels.get(cleanCode)
-    if (channel) {
-      void channel.send({
-        type: 'broadcast',
-        event: 'ATTENDANCE_EVENT',
-        payload: msg,
-      })
-    }
-  }
-
-  broadcastFullSync(syncCode: string, event: EventRecord): void {
-    const cleanCode = syncCode.trim().toLowerCase()
-    const msg: BroadcastFullSyncMessage = {
-      type: 'FULL_EVENT_SYNC',
-      syncCode,
-      event,
-    }
-
-    const bc = this.broadcastChannels.get(cleanCode)
-    if (bc) {
-      bc.postMessage(msg)
-    }
-
-    const channel = this.activeChannels.get(cleanCode)
-    if (channel) {
-      void channel.send({
-        type: 'broadcast',
-        event: 'ATTENDANCE_EVENT',
-        payload: msg,
-      })
-    }
-
-    // Also persist to Supabase Cloud DB
-    void this.saveEventToCloud(event)
   }
 }
 
