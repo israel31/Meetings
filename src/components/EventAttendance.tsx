@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { EventRecord } from '../types'
 import { exportAttendanceCsv, exportAttendanceXlsx, type ExportFilter } from '../lib/spreadsheet'
 import { getDeviceName, syncManager } from '../lib/supabase'
