@@ -67,43 +67,75 @@ export default function App() {
   }
 }, [events])
 
-  function createEvent(payload: {
-    title: string
-    date: string
-    location: string
-    notes: string
-    sourceLabel: string
-    lists: RosterListInput[]
-    attendees: Attendee[]
-    syncCode: string
-  }) {
-    const event: EventRecord = {
-      id: crypto.randomUUID(),
-      title: payload.title,
-      date: payload.date,
-      location: payload.location,
-      notes: payload.notes,
-      sourceLabel: payload.sourceLabel,
-      lists: payload.lists,
-      attendees: payload.attendees,
-      syncCode: payload.syncCode,
-      createdAt: new Date().toISOString(),
-    }
-    setEvents((prev) => [event, ...prev])
-    setView({ name: 'event', eventId: event.id })
-    syncManager.broadcastFullSync(payload.syncCode, event)
+function createEvent(payload: {
+  title: string
+  date: string
+  location: string
+  notes: string
+  sourceLabel: string
+  lists: RosterListInput[]
+  attendees: Attendee[]
+  syncCode: string
+}) {
+  const event: EventRecord = {
+    id: crypto.randomUUID(),
+    title: payload.title,
+    date: payload.date,
+    location: payload.location,
+    notes: payload.notes,
+    sourceLabel: payload.sourceLabel,
+    lists: payload.lists,
+    attendees: payload.attendees,
+    syncCode: payload.syncCode,
+    createdAt: new Date().toISOString(),
   }
 
-  function updateEvent(updated: EventRecord) {
-  setEvents((prev) =>
-    prev.map((e) => (e.id === updated.id ? updated : e))
+  // Queue the cloud creation; do not wait for the internet.
+  syncManager.enqueueCreate(event)
+
+  const next = [event, ...eventsRef.current]
+
+  eventsRef.current = next
+  setEvents(next)
+
+  setView({ name: 'event', eventId: event.id })
+}
+
+function updateEvent(updated: EventRecord) {
+  const previous = eventsRef.current.find(
+    (event) => event.id === updated.id,
   )
+
+  if (previous && updated.syncCode) {
+    syncManager.enqueueEventChanges(previous, updated)
+  }
+
+  const next = eventsRef.current.map((event) =>
+    event.id === updated.id ? updated : event,
+  )
+
+  eventsRef.current = next
+  setEvents(next)
 }
 
   function deleteEvent(eventId: string) {
-    setEvents((prev) => prev.filter((e) => e.id !== eventId))
-    setView({ name: 'home' })
+  const event = eventsRef.current.find(
+    (item) => item.id === eventId,
+  )
+
+  if (event?.syncCode) {
+    syncManager.enqueueDelete(event)
   }
+
+  const next = eventsRef.current.filter(
+    (item) => item.id !== eventId,
+  )
+
+  eventsRef.current = next
+  setEvents(next)
+
+  setView({ name: 'home' })
+}
 
   async function handleJoinRoomCode(syncCode: string) {
     const clean = syncCode.trim().toUpperCase()
@@ -115,12 +147,21 @@ export default function App() {
 
     setJoiningSyncCode(clean)
     const cloudEvent = await syncManager.fetchEventFromCloud(clean)
-    if (cloudEvent) {
-      setEvents((prev) => [cloudEvent, ...prev.filter((e) => e.id !== cloudEvent.id)])
-      setJoiningSyncCode(null)
-      setView({ name: 'event', eventId: cloudEvent.id })
-      return
-    }
+if (cloudEvent) {
+  const next = [
+    cloudEvent,
+    ...eventsRef.current.filter(
+      (event) => event.id !== cloudEvent.id,
+    ),
+  ]
+
+  eventsRef.current = next
+  setEvents(next)
+
+  setJoiningSyncCode(null)
+  setView({ name: 'event', eventId: cloudEvent.id })
+  return
+}
 
     const unsubscribe = syncManager.subscribeToSync(clean, (msg) => {
       if (msg.type === 'FULL_EVENT_SYNC' && msg.event) {
