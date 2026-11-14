@@ -91,31 +91,61 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
     })
   }, [event.attendees, selectedListId, selectedFamily, query, filter])
 
-  function toggle(attendeeId: string) {
-    const now = new Date().toISOString()
-    let updatedPresent = false
-    let updatedTime: string | undefined = undefined
-    const updatedAttendees = event.attendees.map((a) => {
-      if (a.id !== attendeeId) return a
-      updatedPresent = !a.present
-      updatedTime = updatedPresent ? now : undefined
-      return {
-        ...a,
-        present: updatedPresent,
-        checkedInAt: updatedTime,
-        checkedInBy: updatedPresent ? deviceName : undefined,
-      }
-    })
-    const updatedEvent: EventRecord = {
-      ...event,
-      attendees: updatedAttendees,
-      updatedAt: now,
+function toggle(attendeeId: string) {
+  const now = new Date().toISOString()
+
+  let updatedPresent = false
+  let updatedTime: string | undefined
+  const updatedAttendees = event.attendees.map((a) => {
+    if (a.id !== attendeeId) return a
+
+    updatedPresent = !a.present
+    updatedTime = updatedPresent ? now : undefined
+
+    return {
+      ...a,
+      present: updatedPresent,
+      checkedInAt: updatedTime,
+      checkedInBy: updatedPresent ? deviceName : undefined,
     }
-    onUpdate(updatedEvent)
-    if (event.syncCode) {
-      syncManager.broadcastCheckIn(event.syncCode, attendeeId, updatedPresent, updatedTime)
-    }
+  })
+
+  const updatedEvent: EventRecord = {
+    ...event,
+    attendees: updatedAttendees,
+    updatedAt: now,
   }
+
+  // Update this laptop immediately.
+  onUpdate(updatedEvent)
+
+  if (event.syncCode) {
+    // Update only this attendee in the cloud.
+    void syncManager
+      .updateAttendeeInCloud(
+        event.syncCode,
+        attendeeId,
+        updatedPresent,
+        updatedTime,
+        deviceName,
+      )
+      .then((success) => {
+        if (!success) {
+          alert(
+            'Attendance was saved on this device, but cloud sync failed. Keep this device and its browser data until the connection is restored.',
+          )
+        }
+      })
+
+    // Notify other connected devices.
+    syncManager.broadcastCheckIn(
+      event.syncCode,
+      attendeeId,
+      updatedPresent,
+      updatedTime,
+    )
+  }
+}
 
   function markAll(present: boolean) {
     const now = new Date().toISOString()
