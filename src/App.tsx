@@ -13,13 +13,8 @@ export default function App() {
   const [joiningSyncCode, setJoiningSyncCode] = useState<string | null>(null)
 
   useEffect(() => {
-    saveEvents(events)
-    events.forEach((evt) => {
-      if (evt.syncCode) {
-        void syncManager.saveEventToCloud(evt)
-      }
-    })
-  }, [events])
+  saveEvents(events)
+}, [events])
 
   useEffect(() => {
     function getEventCodeFromUrl(): string | null {
@@ -51,22 +46,26 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (events.length === 0) return
-    const cleanupFns: Array<() => void> = []
-    events.forEach((evt) => {
-      if (!evt.syncCode) return
-      void syncManager.saveEventToCloud(evt)
-      const unsub = syncManager.subscribeToSync(evt.syncCode, (msg) => {
-        if (msg.type === 'REQUEST_SYNC') {
-          syncManager.broadcastFullSync(evt.syncCode, evt)
-        }
-      })
-      cleanupFns.push(unsub)
+  if (events.length === 0) return
+
+  const cleanupFns: Array<() => void> = []
+
+  events.forEach((evt) => {
+    if (!evt.syncCode) return
+
+    const unsub = syncManager.subscribeToSync(evt.syncCode, (msg) => {
+      if (msg.type === 'REQUEST_SYNC') {
+        syncManager.broadcastFullSync(evt.syncCode, evt)
+      }
     })
-    return () => {
-      cleanupFns.forEach((fn) => fn())
-    }
-  }, [events])
+
+    cleanupFns.push(unsub)
+  })
+
+  return () => {
+    cleanupFns.forEach((fn) => fn())
+  }
+}, [events])
 
   function createEvent(payload: {
     title: string
@@ -96,11 +95,10 @@ export default function App() {
   }
 
   function updateEvent(updated: EventRecord) {
-    setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))
-    if (updated.syncCode) {
-      syncManager.saveEventToCloud(updated)
-    }
-  }
+  setEvents((prev) =>
+    prev.map((e) => (e.id === updated.id ? updated : e))
+  )
+}
 
   function deleteEvent(eventId: string) {
     setEvents((prev) => prev.filter((e) => e.id !== eventId))
