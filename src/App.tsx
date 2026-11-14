@@ -61,26 +61,31 @@ export default function App() {
         setEvents(next)
       },
 
-      onRemoteDeleted: (syncCode) => {
-        const next = eventsRef.current.filter(
-          (event) =>
-            event.syncCode.toUpperCase() !==
-            syncCode.toUpperCase(),
-        )
+onRemoteDeleted: (syncCode) => {
+  const currentEvents = eventsRef.current
 
-        eventsRef.current = next
-        setEvents(next)
+  const deletedEvent = currentEvents.find(
+    (event) =>
+      event.syncCode.toUpperCase() === syncCode.toUpperCase(),
+  )
 
-        setView((current) => {
-          if (current.name !== 'event') return current
+  const next = currentEvents.filter(
+    (event) =>
+      event.syncCode.toUpperCase() !== syncCode.toUpperCase(),
+  )
 
-          const deletedEvent = eventsRef.current.find(
-            (event) => event.syncCode.toUpperCase() === syncCode.toUpperCase(),
-          )
+  eventsRef.current = next
+  setEvents(next)
 
-          return deletedEvent ? current : { name: 'home' }
-        })
-      },
+  if (deletedEvent) {
+    setView((current) =>
+      current.name === 'event' &&
+      current.eventId === deletedEvent.id
+        ? { name: 'home' }
+        : current,
+    )
+  }
+},
     })
 
     return stopSync
