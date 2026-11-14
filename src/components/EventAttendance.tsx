@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { EventRecord } from '../types'
 import { exportAttendanceCsv, exportAttendanceXlsx, type ExportFilter } from '../lib/spreadsheet'
-import { getDeviceName, syncManager } from '../lib/supabase'
+import { getDeviceName } from '../lib/supabase'
 import { ShareRoomModal } from './ShareRoomModal'
 import { DatabaseSettingsModal } from './DatabaseSettingsModal'
 
@@ -37,32 +37,6 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
     return Array.from(set).sort()
   }, [event.attendees])
 
-  useEffect(() => {
-    if (!event.syncCode) return
-    const unsubscribe = syncManager.subscribeToSync(event.syncCode, (msg) => {
-      if (msg.type === 'CHECKIN_UPDATE') {
-        if (msg.checkedInBy && msg.checkedInBy === deviceName) return
-        onUpdate({
-          ...event,
-          attendees: event.attendees.map((a) => {
-            if (a.id !== msg.attendeeId) return a
-            return {
-              ...a,
-              present: msg.present,
-              checkedInAt: msg.checkedInAt,
-              checkedInBy: msg.checkedInBy,
-            }
-          }),
-        })
-      } else if (msg.type === 'FULL_EVENT_SYNC') {
-        onUpdate(msg.event)
-      }
-    })
-    return () => {
-      unsubscribe()
-    }
-  }, [event.syncCode, event.attendees, deviceName])
-
   const lists = event.lists || []
 
   const stats = useMemo(() => {
@@ -94,80 +68,55 @@ export function EventAttendance({ event, onBack, onUpdate, onDelete }: Props) {
 function toggle(attendeeId: string) {
   const now = new Date().toISOString()
 
-  let updatedPresent = false
-  let updatedTime: string | undefined
-  const updatedAttendees = event.attendees.map((a) => {
-    if (a.id !== attendeeId) return a
+  const updatedAttendees = event.attendees.map((attendee) => {
+    if (attendee.id !== attendeeId) return attendee
 
-    updatedPresent = !a.present
-    updatedTime = updatedPresent ? now : undefined
+    const present = !attendee.present
 
     return {
-      ...a,
-      present: updatedPresent,
-      checkedInAt: updatedTime,
-      checkedInBy: updatedPresent ? deviceName : undefined,
+      ...attendee,
+      present,
+      checkedInAt: present ? now : undefined,
+      checkedInBy: present ? deviceName : undefined,
     }
   })
 
-  const updatedEvent: EventRecord = {
+  onUpdate({
     ...event,
     attendees: updatedAttendees,
     updatedAt: now,
-  }
-
-  // Update this laptop immediately.
-  onUpdate(updatedEvent)
-
-  if (event.syncCode) {
-    // Update only this attendee in the cloud.
-    void syncManager
-      .updateAttendeeInCloud(
-        event.syncCode,
-        attendeeId,
-        updatedPresent,
-        updatedTime,
-        deviceName,
-      )
-      .then((success) => {
-        if (!success) {
-          alert(
-            'Attendance was saved on this device, but cloud sync failed. Keep this device and its browser data until the connection is restored.',
-          )
-        }
-      })
-
-    // Notify other connected devices.
-    syncManager.broadcastCheckIn(
-      event.syncCode,
-      attendeeId,
-      updatedPresent,
-      updatedTime,
-    )
-  }
+  })
 }
 
-  function markAll(present: boolean) {
-    const now = new Date().toISOString()
-    const updatedAttendees = event.attendees.map((a) => {
-      if (selectedListId !== 'all' && a.listId !== selectedListId) return a
-      return {
-        ...a,
-        present,
-        checkedInAt: present ? a.checkedInAt || now : undefined,
-        checkedInBy: present ? a.checkedInBy || deviceName : undefined,
-      }
-    })
-    const updatedEvent: EventRecord = {
-      ...event,
-      attendees: updatedAttendees,
-      updatedAt: now,
+function markAll(present: boolean) {
+  const now = new Date().toISOString()
+
+  const updatedAttendees = event.attendees.map((attendee) => {
+    if (
+      selectedListId !== 'all' &&
+      attendee.listId !== selectedListId
+    ) {
+      return attendee
     }
-    onUpdate(updatedEvent)
-    if (event.syncCode) {
-      syncManager.broadcastFullSync(event.syncCode, updatedEvent)
+
+    return {
+      ...attendee,
+      present,
+      checkedInAt: present
+        ? attendee.checkedInAt || now
+        : undefined,
+      checkedInBy: present
+        ? attendee.checkedInBy || deviceName
+        : undefined,
     }
-  }
+  })
+
+  onUpdate({
+    ...event,
+    attendees: updatedAttendees,
+    updatedAt: now,
+  })
+}
 
   function handleEndEvent() {
     if (window.confirm(`End "${event.title}"? Attendance will be finalized.`)) {
@@ -177,9 +126,6 @@ function toggle(attendeeId: string) {
         endedAt: new Date().toISOString(),
       }
       onUpdate(updatedEvent)
-      if (event.syncCode) {
-        syncManager.broadcastFullSync(event.syncCode, updatedEvent)
-      }
     }
   }
 
@@ -191,9 +137,6 @@ function toggle(attendeeId: string) {
         endedAt: undefined,
       }
       onUpdate(updatedEvent)
-      if (event.syncCode) {
-        syncManager.broadcastFullSync(event.syncCode, updatedEvent)
-      }
     }
   }
 
