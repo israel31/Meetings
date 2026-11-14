@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Attendee, EventRecord, RosterListInput, View } from './types'
 import { loadEvents, saveEvents } from './lib/storage'
 import { Home } from './components/Home'
