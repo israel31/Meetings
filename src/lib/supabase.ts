@@ -182,6 +182,48 @@ class MeetingSyncManager {
     }
   }
 
+  async updateAttendeeInCloud(
+  syncCode: string,
+  attendeeId: string,
+  present: boolean,
+  checkedInAt: string | undefined,
+  checkedInBy: string,
+): Promise<boolean> {
+  const client = getSupabaseClient()
+
+  if (!client) {
+    console.error('Supabase client is not configured.')
+    return false
+  }
+
+  try {
+    const { data, error } = await client.rpc('update_meeting_attendance', {
+      p_sync_code: syncCode.trim().toUpperCase(),
+      p_attendee_id: attendeeId,
+      p_present: present,
+      p_checked_in_at: checkedInAt ?? null,
+      p_checked_in_by: present ? checkedInBy : null,
+    })
+
+    if (error) {
+      console.error('Cloud attendance update failed:', error)
+      return false
+    }
+
+    if (!data) {
+      console.error('No matching event was found in the cloud.')
+      return false
+    }
+
+    return true
+  } catch (error) {
+    console.error('Attendance sync error:', error)
+    return false
+  }
+}
+
+  
+
   subscribeToSync(syncCode: string, onSync: SyncCallback): () => void {
     const cleanCode = syncCode.trim().toLowerCase()
     const channelName = `meeting-room-${cleanCode}`
