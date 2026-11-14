@@ -354,27 +354,36 @@ class MeetingSyncManager {
     }
   }
 
-  async fetchEventFromCloud(
-    syncCode: string,
-  ): Promise<EventRecord | null> {
-    const client = getSupabaseClient()
-    if (!client) return null
+async fetchEventFromCloud(
+  syncCode: string,
+): Promise<EventRecord | null | undefined> {
+  const client = getSupabaseClient()
+  if (!client) return undefined
 
-    try {
-      const { data, error } = await client
-        .from('meetings_events')
-        .select('event_data')
-        .eq('sync_code', syncCode.trim().toUpperCase())
-        .maybeSingle()
+  try {
+    const { data, error } = await client
+      .from('meetings_events')
+      .select('event_data')
+      .eq('sync_code', syncCode.trim().toUpperCase())
+      .maybeSingle()
 
-      if (error || !data?.event_data) return null
-
-      return data.event_data as EventRecord
-    } catch (error) {
+    if (error) {
       console.error('Cloud event fetch failed:', error)
-      return null
+      return undefined
     }
+
+    // No cloud record. This may simply be an old local-only event.
+    if (!data?.event_data) return undefined
+
+    // A deletion marker means another device deleted this event.
+    if (data.event_data.__deleted === true) return null
+
+    return data.event_data as EventRecord
+  } catch (error) {
+    console.error('Cloud event fetch failed:', error)
+    return undefined
   }
+}
 
   applyPendingOperations(
     remoteEvent: EventRecord,
@@ -476,17 +485,18 @@ class MeetingSyncManager {
             localEvent.syncCode,
           )
 
-          if (remoteEvent) {
-            const merged = this.applyPendingOperations(remoteEvent)
+if (remoteEvent) {
+  const merged = this.applyPendingOperations(remoteEvent)
 
-            if (merged) {
-              options.onRemoteEvent(merged)
-            }
-          } else if (
-            !this.hasPendingOperations(localEvent.syncCode)
-          ) {
-            options.onRemoteDeleted(localEvent.syncCode)
-          }
+  if (merged) {
+    options.onRemoteEvent(merged)
+  }
+} else if (
+  remoteEvent === null &&
+  !this.hasPendingOperations(localEvent.syncCode)
+) {
+  options.onRemoteDeleted(localEvent.syncCode)
+}
         }
       } catch (error) {
         console.error('Background sync failed:', error)
