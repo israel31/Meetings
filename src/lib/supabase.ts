@@ -4,7 +4,6 @@ import {
 } from '@supabase/supabase-js'
 
 import type {
-  Attendee,
   EventRecord,
   SupabaseConfig,
 } from '../types'
